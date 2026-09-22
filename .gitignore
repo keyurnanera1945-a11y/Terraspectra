@@ -1,0 +1,21 @@
+# Virtual environment
+.venv/
+
+# Dataset files
+data/
+
+# Large scientific files
+*.npz
+*.npy
+*.zip
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# IDE
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
