@@ -1,0 +1,7 @@
+TerraSpectra PCA Band Information
+=================================
+
+Original spectral bands (nm):
+[420, 440, 500, 510, 531, 550, 570, 670, 672, 680, 690, 695, 700, 708, 710, 770, 800, 850, 900, 970]
+
+Components for 95% variance: 2
