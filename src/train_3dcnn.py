@@ -1,304 +1,248 @@
-from pathlib import Path
-
+import os
 import numpy as np
+import pandas as pd
 import torch
-import torch.nn as nn
+
 from torch.utils.data import DataLoader
+
+from sklearn.metrics import accuracy_score
 
 from dataset import TerraSpectraDataset
 from model_3dcnn import TerraSpectra3DCNN
 
 
 # ============================================================
-# PATHS
-# ============================================================
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-TRAIN_CSV = PROJECT_ROOT / "outputs" / "train_patches.csv"
-VAL_CSV = PROJECT_ROOT / "outputs" / "val_patches.csv"
-
-MODEL_DIR = PROJECT_ROOT / "outputs" / "models"
-MODEL_DIR.mkdir(parents=True, exist_ok=True)
-
-BEST_MODEL_PATH = MODEL_DIR / "terraspectra_3dcnn_best.pt"
-
-
-# ============================================================
 # CONFIGURATION
 # ============================================================
 
+PATCH_CSV = "outputs/hyperspectral_patches.csv"
+
+TRAIN_CSV = "outputs/train_patches.csv"
+VAL_CSV = "outputs/val_patches.csv"
+
+MODEL_PATH = "outputs/models/terraspectra_3dcnn_augmented_best.pt"
+
 BATCH_SIZE = 16
-NUM_EPOCHS = 10
+EPOCHS = 10
 LEARNING_RATE = 0.001
 
 NUM_CLASSES = 3
 
-RANDOM_SEED = 42
-
-
-# ============================================================
-# REPRODUCIBILITY
-# ============================================================
-
-torch.manual_seed(RANDOM_SEED)
-np.random.seed(RANDOM_SEED)
-
-
-# ============================================================
-# DEVICE
-# ============================================================
-
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-# ============================================================
-# HEADER
-# ============================================================
-
-print("=" * 70)
-print("TERRASPECTRA 3D CNN TRAINING")
-print("=" * 70)
-
-print(f"\nDevice       : {DEVICE}")
-print(f"Batch size   : {BATCH_SIZE}")
-print(f"Epochs       : {NUM_EPOCHS}")
-print(f"Learning rate: {LEARNING_RATE}")
-
-
-# ============================================================
-# DATASETS
-# ============================================================
-
-print("\nLoading training dataset...")
-
-train_dataset = TerraSpectraDataset(
-    csv_file=TRAIN_CSV
-)
-
-print("\nLoading validation dataset...")
-
-val_dataset = TerraSpectraDataset(
-    csv_file=VAL_CSV
+DEVICE = torch.device(
+    "cuda" if torch.cuda.is_available() else "cpu"
 )
 
 
 # ============================================================
-# DATALOADERS
+# MAIN
 # ============================================================
 
-train_loader = DataLoader(
-    train_dataset,
-    batch_size=BATCH_SIZE,
-    shuffle=True,
-    num_workers=0
-)
+def main():
 
-val_loader = DataLoader(
-    val_dataset,
-    batch_size=BATCH_SIZE,
-    shuffle=False,
-    num_workers=0
-)
-
-
-print("\nDataLoaders created.")
-
-print(f"Training batches   : {len(train_loader)}")
-print(f"Validation batches : {len(val_loader)}")
-
-
-# ============================================================
-# CLASS WEIGHTS
-# ============================================================
-
-train_labels = train_dataset.df["class_id"].values
-
-class_counts = np.bincount(
-    train_labels,
-    minlength=NUM_CLASSES
-)
-
-print("\nTraining class counts:")
-
-for class_id, count in enumerate(class_counts):
-    print(f"Class {class_id}: {count}")
-
-
-# ------------------------------------------------------------
-# Balanced class weights
-# ------------------------------------------------------------
-
-total_samples = len(train_labels)
-
-class_weights = total_samples / (
-    NUM_CLASSES * class_counts
-)
-
-class_weights = torch.tensor(
-    class_weights,
-    dtype=torch.float32
-).to(DEVICE)
-
-
-print("\nClass weights:")
-
-for class_id, weight in enumerate(class_weights):
-    print(
-        f"Class {class_id}: {weight.item():.4f}"
-    )
-
-
-# ============================================================
-# MODEL
-# ============================================================
-
-model = TerraSpectra3DCNN(
-    num_classes=NUM_CLASSES
-)
-
-model = model.to(DEVICE)
-
-
-print("\nModel loaded.")
-
-total_parameters = sum(
-    p.numel()
-    for p in model.parameters()
-)
-
-print(f"Trainable parameters: {total_parameters:,}")
-
-
-# ============================================================
-# LOSS FUNCTION
-# ============================================================
-
-criterion = nn.CrossEntropyLoss(
-    weight=class_weights
-)
-
-
-# ============================================================
-# OPTIMIZER
-# ============================================================
-
-optimizer = torch.optim.Adam(
-    model.parameters(),
-    lr=LEARNING_RATE
-)
-
-
-# ============================================================
-# TRAINING VARIABLES
-# ============================================================
-
-best_val_accuracy = 0.0
-
-
-# ============================================================
-# TRAINING LOOP
-# ============================================================
-
-for epoch in range(NUM_EPOCHS):
-
-    print("\n" + "=" * 70)
-    print(
-        f"Epoch {epoch + 1}/{NUM_EPOCHS}"
-    )
+    print("=" * 70)
+    print("TerraSpectra - Augmented 3D CNN Training")
     print("=" * 70)
 
+    print()
+    print("Device:", DEVICE)
+
     # --------------------------------------------------------
-    # TRAINING
+    # Load training dataset
     # --------------------------------------------------------
 
-    model.train()
+    train_dataset = TerraSpectraDataset(
+        csv_file=TRAIN_CSV,
+        hsi_root="data/raw/hyperspectral/0",
+        augment=True
+    )
 
-    running_loss = 0.0
-    correct = 0
-    total = 0
+    # --------------------------------------------------------
+    # Load validation dataset
+    #
+    # IMPORTANT:
+    # No augmentation on validation data.
+    # --------------------------------------------------------
 
-    for batch_index, (inputs, labels) in enumerate(train_loader):
+    val_dataset = TerraSpectraDataset(
+        csv_file=VAL_CSV,
+        hsi_root="data/raw/hyperspectral/0",
+        augment=False
+    )
 
-        # Add channel dimension
-        # [B, 20, 32, 32]
-        # →
-        # [B, 1, 20, 32, 32]
+    print("Training samples  :", len(train_dataset))
+    print("Validation samples:", len(val_dataset))
 
-        inputs = inputs.unsqueeze(1)
+    # --------------------------------------------------------
+    # DataLoaders
+    # --------------------------------------------------------
 
-        inputs = inputs.to(DEVICE)
-        labels = labels.to(DEVICE)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=0
+    )
 
-        # Clear gradients
-        optimizer.zero_grad()
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=0
+    )
 
-        # Forward pass
-        outputs = model(inputs)
+    # --------------------------------------------------------
+    # Calculate class weights
+    # --------------------------------------------------------
 
-        # Calculate loss
-        loss = criterion(
-            outputs,
-            labels
+    train_df = pd.read_csv(TRAIN_CSV)
+
+    class_counts = (
+        train_df["class_id"]
+        .value_counts()
+        .sort_index()
+    )
+
+    print()
+    print("Training class distribution:")
+    print(class_counts)
+
+    total_samples = len(train_df)
+
+    class_weights = []
+
+    for class_id in range(NUM_CLASSES):
+
+        count = class_counts.get(
+            class_id,
+            1
         )
 
-        # Backpropagation
-        loss.backward()
-
-        # Update weights
-        optimizer.step()
-
-        # Statistics
-        running_loss += (
-            loss.item() * inputs.size(0)
+        weight = total_samples / (
+            NUM_CLASSES * count
         )
 
-        predictions = torch.argmax(
-            outputs,
-            dim=1
+        class_weights.append(weight)
+
+    class_weights = torch.tensor(
+        class_weights,
+        dtype=torch.float32
+    ).to(DEVICE)
+
+    print()
+    print("Class weights:")
+
+    for i, weight in enumerate(class_weights):
+
+        print(
+            f"Class {i}: {weight.item():.4f}"
         )
 
-        total += labels.size(0)
-
-        correct += (
-            predictions == labels
-        ).sum().item()
-
-    train_loss = running_loss / total
-
-    train_accuracy = (
-        correct / total
-    ) * 100
-
-
     # --------------------------------------------------------
-    # VALIDATION
+    # Create model
     # --------------------------------------------------------
 
-    model.eval()
+    model = TerraSpectra3DCNN(
+        num_classes=NUM_CLASSES
+    )
 
-    val_loss_total = 0.0
-    val_correct = 0
-    val_total = 0
+    model = model.to(DEVICE)
 
-    with torch.no_grad():
+    print()
+    print(
+        "Trainable parameters:",
+        sum(
+            p.numel()
+            for p in model.parameters()
+            if p.requires_grad
+        )
+    )
 
-        for inputs, labels in val_loader:
+    # --------------------------------------------------------
+    # Loss function
+    # --------------------------------------------------------
 
-            inputs = inputs.unsqueeze(1)
+    criterion = torch.nn.CrossEntropyLoss(
+        weight=class_weights
+    )
 
-            inputs = inputs.to(DEVICE)
-            labels = labels.to(DEVICE)
+    # --------------------------------------------------------
+    # Optimizer
+    # --------------------------------------------------------
 
-            outputs = model(inputs)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=LEARNING_RATE
+    )
 
+    # --------------------------------------------------------
+    # Learning-rate scheduler
+    # --------------------------------------------------------
+
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=0.5,
+        patience=2
+    )
+
+    # --------------------------------------------------------
+    # Training
+    # --------------------------------------------------------
+
+    best_val_loss = float("inf")
+
+    os.makedirs(
+        os.path.dirname(MODEL_PATH),
+        exist_ok=True
+    )
+
+    for epoch in range(EPOCHS):
+
+        # ====================================================
+        # TRAIN
+        # ====================================================
+
+        model.train()
+
+        train_losses = []
+        train_predictions = []
+        train_labels = []
+
+        for batch_x, batch_y in train_loader:
+
+            # ------------------------------------------------
+            # Add channel dimension for 3D CNN
+            #
+            # [B, 20, 32, 32]
+            # ->
+            # [B, 1, 20, 32, 32]
+            # ------------------------------------------------
+
+            batch_x = batch_x.unsqueeze(1)
+
+            batch_x = batch_x.to(DEVICE)
+            batch_y = batch_y.to(DEVICE)
+
+            # Clear gradients
+            optimizer.zero_grad()
+
+            # Forward pass
+            outputs = model(batch_x)
+
+            # Loss
             loss = criterion(
                 outputs,
-                labels
+                batch_y
             )
 
-            val_loss_total += (
-                loss.item() * inputs.size(0)
+            # Backpropagation
+            loss.backward()
+
+            # Update weights
+            optimizer.step()
+
+            train_losses.append(
+                loss.item()
             )
 
             predictions = torch.argmax(
@@ -306,86 +250,139 @@ for epoch in range(NUM_EPOCHS):
                 dim=1
             )
 
-            val_total += labels.size(0)
+            train_predictions.extend(
+                predictions.detach().cpu().numpy()
+            )
 
-            val_correct += (
-                predictions == labels
-            ).sum().item()
+            train_labels.extend(
+                batch_y.detach().cpu().numpy()
+            )
 
-    val_loss = (
-        val_loss_total / val_total
-    )
+        # ----------------------------------------------------
+        # Training metrics
+        # ----------------------------------------------------
 
-    val_accuracy = (
-        val_correct / val_total
-    ) * 100
+        train_loss = np.mean(train_losses)
 
-
-    # --------------------------------------------------------
-    # PRINT RESULTS
-    # --------------------------------------------------------
-
-    print(
-        f"\nTrain Loss     : {train_loss:.4f}"
-    )
-
-    print(
-        f"Train Accuracy : {train_accuracy:.2f}%"
-    )
-
-    print(
-        f"Val Loss       : {val_loss:.4f}"
-    )
-
-    print(
-        f"Val Accuracy   : {val_accuracy:.2f}%"
-    )
-
-
-    # --------------------------------------------------------
-    # SAVE BEST MODEL
-    # --------------------------------------------------------
-
-    if val_accuracy > best_val_accuracy:
-
-        best_val_accuracy = val_accuracy
-
-        torch.save(
-            {
-                "model_state_dict": model.state_dict(),
-                "num_classes": NUM_CLASSES,
-                "best_val_accuracy": best_val_accuracy,
-                "epoch": epoch + 1
-            },
-            BEST_MODEL_PATH
+        train_accuracy = accuracy_score(
+            train_labels,
+            train_predictions
         )
+
+        # ====================================================
+        # VALIDATION
+        # ====================================================
+
+        model.eval()
+
+        val_losses = []
+        val_predictions = []
+        val_labels = []
+
+        with torch.no_grad():
+
+            for batch_x, batch_y in val_loader:
+
+                batch_x = batch_x.unsqueeze(1)
+
+                batch_x = batch_x.to(DEVICE)
+                batch_y = batch_y.to(DEVICE)
+
+                outputs = model(batch_x)
+
+                loss = criterion(
+                    outputs,
+                    batch_y
+                )
+
+                val_losses.append(
+                    loss.item()
+                )
+
+                predictions = torch.argmax(
+                    outputs,
+                    dim=1
+                )
+
+                val_predictions.extend(
+                    predictions.cpu().numpy()
+                )
+
+                val_labels.extend(
+                    batch_y.cpu().numpy()
+                )
+
+        # ----------------------------------------------------
+        # Validation metrics
+        # ----------------------------------------------------
+
+        val_loss = np.mean(val_losses)
+
+        val_accuracy = accuracy_score(
+            val_labels,
+            val_predictions
+        )
+
+        # ----------------------------------------------------
+        # Update scheduler
+        # ----------------------------------------------------
+
+        scheduler.step(val_loss)
+
+        current_lr = optimizer.param_groups[0]["lr"]
+
+        # ----------------------------------------------------
+        # Print results
+        # ----------------------------------------------------
 
         print(
-            f"\n✓ Best model saved!"
+            f"Epoch {epoch + 1:02d}/{EPOCHS} | "
+            f"Train Loss: {train_loss:.4f} | "
+            f"Train Acc: {train_accuracy * 100:.2f}% | "
+            f"Val Loss: {val_loss:.4f} | "
+            f"Val Acc: {val_accuracy * 100:.2f}% | "
+            f"LR: {current_lr:.6f}"
         )
 
-        print(
-            f"Path: {BEST_MODEL_PATH}"
-        )
+        # ----------------------------------------------------
+        # Save best model
+        # ----------------------------------------------------
+
+        if val_loss < best_val_loss:
+
+            best_val_loss = val_loss
+
+            torch.save(
+                {
+                    "epoch": epoch + 1,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "val_loss": val_loss,
+                    "val_accuracy": val_accuracy
+                },
+                MODEL_PATH
+            )
+
+            print(
+                f"  -> Best model saved: {MODEL_PATH}"
+            )
+
+    print()
+    print("=" * 70)
+    print("Training completed!")
+    print("=" * 70)
+
+    print()
+    print("Best validation loss:", best_val_loss)
+
+    print()
+    print("Best model:")
+    print(MODEL_PATH)
 
 
 # ============================================================
-# TRAINING COMPLETE
+# RUN
 # ============================================================
 
-print("\n" + "=" * 70)
-print("TRAINING COMPLETED")
-print("=" * 70)
-
-print(
-    f"\nBest validation accuracy: "
-    f"{best_val_accuracy:.2f}%"
-)
-
-print(
-    f"\nBest model:"
-)
-
-print(BEST_MODEL_PATH)
-
-print("\n" + "=" * 70)
+if __name__ == "__main__":
+    main()
