@@ -1,122 +1,88 @@
-from pathlib import Path
-
+import os
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
+import torch.nn.functional as F
 
-
-# ============================================================
-# PROJECT PATHS
-# ============================================================
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-CSV_FILE = (
-    PROJECT_ROOT
-    / "outputs"
-    / "hyperspectral_patches.csv"
-)
-
-
-# ============================================================
-# DATASET
-# ============================================================
 
 class TerraSpectraDataset(Dataset):
 
     def __init__(
         self,
-        csv_file=CSV_FILE,
-        target_size=32,
+        csv_file,
+        hsi_root="data/raw/hyperspectral/0",
+        augment=False
     ):
-        self.project_root = PROJECT_ROOT
-
         self.df = pd.read_csv(csv_file)
-
-        self.target_size = target_size
-
-        print(
-            f"Dataset samples: {len(self.df)}"
-        )
-
-    # --------------------------------------------------------
-    # Number of samples
-    # --------------------------------------------------------
+        self.hsi_root = hsi_root
+        self.augment = augment
 
     def __len__(self):
         return len(self.df)
 
-    # --------------------------------------------------------
-    # Load one hyperspectral sample
-    # --------------------------------------------------------
+    def __getitem__(self, idx):
 
-    def __getitem__(self, index):
+        row = self.df.iloc[idx]
 
-        row = self.df.iloc[index]
+        # ==================================================
+        # LOAD HYPERSPECTRAL FILE
+        # ==================================================
 
-        # ----------------------------------------------------
-        # Load NPZ file
-        # ----------------------------------------------------
+        hsi_file = str(row["hsi_file"])
 
-        hsi_path = (
-            self.project_root
-            / row["hsi_file"]
-        )
+        # CSV may contain:
+        # data\raw\hyperspectral\0\0001.npz
+        #
+        # or only:
+        # 0001.npz
 
+        if hsi_file.startswith("data"):
+            hsi_path = hsi_file
+        else:
+            hsi_path = os.path.join(
+                self.hsi_root,
+                hsi_file
+            )
+
+        # Convert Windows path to normalized path
+        hsi_path = os.path.normpath(hsi_path)
+
+        # Check file exists
+        if not os.path.exists(hsi_path):
+            raise FileNotFoundError(
+                f"Hyperspectral file not found:\n{hsi_path}"
+            )
+
+        # Load NPZ
         data = np.load(hsi_path)
 
-        cube = data["im"].astype(
-            np.float32
-        )
+        image = data["im"]
 
-        # Original shape:
-        #
-        # H × W × Bands
-        #
-        # 120 × 120 × 20
-
-        # ----------------------------------------------------
-        # Bounding box
-        # ----------------------------------------------------
+        # ==================================================
+        # GET BOUNDING BOX
+        # ==================================================
 
         x1 = int(row["x1"])
         y1 = int(row["y1"])
         x2 = int(row["x2"])
         y2 = int(row["y2"])
 
-        # ----------------------------------------------------
-        # Crop hyperspectral patch
-        # ----------------------------------------------------
+        # ==================================================
+        # CROP HYPERSPECTRAL PATCH
+        # ==================================================
 
-        patch = cube[
-            y1:y2,
-            x1:x2,
-            :
-        ]
+        patch = image[y1:y2, x1:x2, :]
 
-        # ----------------------------------------------------
-        # Safety check
-        # ----------------------------------------------------
+        # ==================================================
+        # CONVERT TO FLOAT32
+        # ==================================================
 
-        if (
-            patch.size == 0
-            or patch.shape[0] == 0
-            or patch.shape[1] == 0
-        ):
+        patch = patch.astype(np.float32)
 
-            raise RuntimeError(
-                f"Empty patch at index {index}"
-            )
-
-        # ----------------------------------------------------
-        # Normalize spectral values
-        # ----------------------------------------------------
-
-        # Dataset values are uint16.
-        #
-        # Convert approximately to [0, 1]
-        # using the observed 16-bit range.
+        # ==================================================
+        # NORMALIZATION
+        # ==================================================
 
         patch = patch / 65535.0
 
@@ -126,116 +92,132 @@ class TerraSpectraDataset(Dataset):
             1.0
         )
 
-        # ----------------------------------------------------
-        # Convert:
+        # ==================================================
+        # HWC -> CHW
         #
-        # H × W × Bands
+        # Original:
+        # Height x Width x Bands
         #
-        # to:
-        #
-        # Bands × H × W
-        # ----------------------------------------------------
+        # Required:
+        # Bands x Height x Width
+        # ==================================================
 
-        patch = np.transpose(
-            patch,
-            (2, 0, 1)
+        patch = torch.from_numpy(patch)
+
+        patch = patch.permute(
+            2,
+            0,
+            1
         )
 
-        # ----------------------------------------------------
-        # Convert to PyTorch tensor
-        # ----------------------------------------------------
-
-        patch = torch.tensor(
-            patch,
-            dtype=torch.float32
-        )
-
-        # ----------------------------------------------------
-        # Resize spatial dimensions
+        # ==================================================
+        # RESIZE SPATIAL DIMENSIONS
         #
-        # 20 × variable_H × variable_W
-        #
-        # →
-        #
-        # 20 × 32 × 32
-        # ----------------------------------------------------
+        # 20 spectral bands
+        # 32 x 32 spatial size
+        # ==================================================
 
         patch = patch.unsqueeze(0)
 
-        patch = torch.nn.functional.interpolate(
+        patch = F.interpolate(
             patch,
-            size=(
-                self.target_size,
-                self.target_size
-            ),
+            size=(32, 32),
             mode="bilinear",
             align_corners=False
         )
 
         patch = patch.squeeze(0)
 
-        # ----------------------------------------------------
-        # Label
-        # ----------------------------------------------------
+        # ==================================================
+        # DATA AUGMENTATION
+        # ==================================================
 
-        label = torch.tensor(
-            int(row["class_id"]),
-            dtype=torch.long
-        )
+        if self.augment:
 
-        return patch, label
+            # ----------------------------------------------
+            # Random horizontal flip
+            # ----------------------------------------------
+
+            if torch.rand(1).item() < 0.5:
+
+                patch = torch.flip(
+                    patch,
+                    dims=[2]
+                )
+
+            # ----------------------------------------------
+            # Random vertical flip
+            # ----------------------------------------------
+
+            if torch.rand(1).item() < 0.5:
+
+                patch = torch.flip(
+                    patch,
+                    dims=[1]
+                )
+
+            # ----------------------------------------------
+            # Random 90-degree rotation
+            # ----------------------------------------------
+
+            k = torch.randint(
+                0,
+                4,
+                (1,)
+            ).item()
+
+            if k > 0:
+
+                patch = torch.rot90(
+                    patch,
+                    k=k,
+                    dims=[1, 2]
+                )
+
+        # ==================================================
+        # LABEL
+        # ==================================================
+
+        label = int(row["class_id"])
+
+        return patch.float(), label
 
 
-# ============================================================
+# ==========================================================
 # TEST DATASET
-# ============================================================
+# ==========================================================
 
 if __name__ == "__main__":
 
-    print("=" * 65)
-    print("TERRASPECTRA PYTORCH DATASET TEST")
-    print("=" * 65)
+    print("=" * 60)
+    print("TerraSpectra Dataset Test")
+    print("=" * 60)
 
-    dataset = TerraSpectraDataset()
-
-    print(
-        f"\nTotal samples: {len(dataset)}"
+    dataset = TerraSpectraDataset(
+        csv_file="outputs/hyperspectral_patches.csv",
+        hsi_root="data/raw/hyperspectral/0",
+        augment=True
     )
+
+    print()
+    print("Dataset samples:", len(dataset))
 
     # Load first sample
 
-    sample, label = dataset[0]
+    patch, label = dataset[0]
 
-    print("\nFirst sample")
-    print("-" * 65)
+    print()
+    print("First sample information")
+    print("-" * 40)
 
-    print(
-        f"Tensor shape : {sample.shape}"
-    )
+    print("Tensor shape :", patch.shape)
+    print("Tensor dtype :", patch.dtype)
+    print("Tensor min   :", patch.min().item())
+    print("Tensor max   :", patch.max().item())
+    print("Tensor mean  :", patch.mean().item())
+    print("Label        :", label)
 
-    print(
-        f"Tensor dtype : {sample.dtype}"
-    )
-
-    print(
-        f"Tensor min   : {sample.min().item():.6f}"
-    )
-
-    print(
-        f"Tensor max   : {sample.max().item():.6f}"
-    )
-
-    print(
-        f"Tensor mean  : {sample.mean().item():.6f}"
-    )
-
-    print(
-        f"Label        : {label.item()}"
-    )
-
-    print("\nExpected tensor format:")
-    print("20 spectral bands × 32 × 32")
-
-    print("\n" + "=" * 65)
-    print("DATASET TEST COMPLETED")
-    print("=" * 65)
+    print()
+    print("=" * 60)
+    print("Dataset test completed successfully!")
+    print("=" * 60)
