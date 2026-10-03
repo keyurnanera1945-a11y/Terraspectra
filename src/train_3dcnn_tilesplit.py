@@ -1,278 +1,573 @@
 import os
+import random
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
-import torch.nn.functional as F
+import torch.nn as nn
+
+from torch.utils.data import DataLoader, WeightedRandomSampler
+
+from dataset import TerraSpectraDataset
+from model_3dcnn import TerraSpectra3DCNN
 
 
-class TerraSpectraDataset(Dataset):
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
-    def __init__(
-        self,
-        csv_file,
-        hsi_root="data/raw/hyperspectral/0",
-        augment=False
-    ):
-        self.df = pd.read_csv(csv_file)
-        self.hsi_root = hsi_root
-        self.augment = augment
+TRAIN_CSV = "outputs/train_tilesplit_patches.csv"
+VAL_CSV = "outputs/val_tilesplit_patches.csv"
 
-    def __len__(self):
-        return len(self.df)
+HSI_ROOT = "data/raw/hyperspectral/0"
 
-    def __getitem__(self, idx):
+MODEL_OUTPUT = "outputs/models/terraspectra_3dcnn_tilesplit_best.pt"
 
-        row = self.df.iloc[idx]
+BATCH_SIZE = 16
+EPOCHS = 10
+LEARNING_RATE = 0.001
 
-        # ==================================================
-        # LOAD HYPERSPECTRAL FILE
-        # ==================================================
+NUM_CLASSES = 3
 
-        hsi_file = str(row["hsi_file"])
+NUM_WORKERS = 0
 
-        # CSV may contain:
-        # data\raw\hyperspectral\0\0001.npz
-        #
-        # or:
-        # 0001.npz
+USE_BALANCED_SAMPLING = True
+USE_AUGMENTATION = True
 
-        if hsi_file.startswith("data"):
-            hsi_path = hsi_file
-        else:
-            hsi_path = os.path.join(
-                self.hsi_root,
-                hsi_file
+RANDOM_SEED = 42
+
+
+# ============================================================
+# REPRODUCIBILITY
+# ============================================================
+
+random.seed(RANDOM_SEED)
+np.random.seed(RANDOM_SEED)
+torch.manual_seed(RANDOM_SEED)
+
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(RANDOM_SEED)
+
+
+# ============================================================
+# DEVICE
+# ============================================================
+
+device = torch.device(
+    "cuda" if torch.cuda.is_available() else "cpu"
+)
+
+print("=" * 65)
+print("TERRASPECTRA TILE-LEVEL 3D-CNN TRAINING")
+print("=" * 65)
+
+print()
+print("Device:", device)
+
+
+# ============================================================
+# CHECK FILES
+# ============================================================
+
+if not os.path.exists(TRAIN_CSV):
+    raise FileNotFoundError(
+        f"Training CSV not found:\n{TRAIN_CSV}"
+    )
+
+if not os.path.exists(VAL_CSV):
+    raise FileNotFoundError(
+        f"Validation CSV not found:\n{VAL_CSV}"
+    )
+
+if not os.path.exists(HSI_ROOT):
+    raise FileNotFoundError(
+        f"Hyperspectral directory not found:\n{HSI_ROOT}"
+    )
+
+
+# ============================================================
+# LOAD DATASETS
+# ============================================================
+
+print()
+print("-" * 65)
+print("Loading datasets...")
+print("-" * 65)
+
+train_dataset = TerraSpectraDataset(
+    csv_file=TRAIN_CSV,
+    hsi_root=HSI_ROOT,
+    augment=USE_AUGMENTATION
+)
+
+val_dataset = TerraSpectraDataset(
+    csv_file=VAL_CSV,
+    hsi_root=HSI_ROOT,
+    augment=False
+)
+
+print()
+print("Training samples  :", len(train_dataset))
+print("Validation samples:", len(val_dataset))
+
+
+# ============================================================
+# CLASS DISTRIBUTION
+# ============================================================
+
+train_labels = train_dataset.df["class_id"].astype(int).values
+val_labels = val_dataset.df["class_id"].astype(int).values
+
+train_counts = np.bincount(
+    train_labels,
+    minlength=NUM_CLASSES
+)
+
+val_counts = np.bincount(
+    val_labels,
+    minlength=NUM_CLASSES
+)
+
+print()
+print("Training class distribution:")
+for class_id in range(NUM_CLASSES):
+    print(
+        f"Class {class_id}: {train_counts[class_id]}"
+    )
+
+print()
+print("Validation class distribution:")
+for class_id in range(NUM_CLASSES):
+    print(
+        f"Class {class_id}: {val_counts[class_id]}"
+    )
+
+
+# ============================================================
+# BALANCED SAMPLING
+# ============================================================
+
+train_sampler = None
+shuffle_train = True
+
+if USE_BALANCED_SAMPLING:
+
+    print()
+    print("-" * 65)
+    print("Using balanced sampling")
+    print("-" * 65)
+
+    class_weights = np.zeros(NUM_CLASSES)
+
+    for class_id in range(NUM_CLASSES):
+
+        if train_counts[class_id] > 0:
+
+            class_weights[class_id] = (
+                1.0 / train_counts[class_id]
             )
 
-        # Normalize Windows path
-        hsi_path = os.path.normpath(hsi_path)
+    sample_weights = np.array(
+        [
+            class_weights[label]
+            for label in train_labels
+        ],
+        dtype=np.float64
+    )
 
-        # Check file exists
-        if not os.path.exists(hsi_path):
-            raise FileNotFoundError(
-                f"Hyperspectral file not found:\n{hsi_path}"
-            )
+    train_sampler = WeightedRandomSampler(
+        weights=torch.as_tensor(
+            sample_weights,
+            dtype=torch.double
+        ),
+        num_samples=len(sample_weights),
+        replacement=True
+    )
 
-        # ==================================================
-        # LOAD NPZ
-        # ==================================================
+    shuffle_train = False
 
-        data = np.load(hsi_path)
+    print()
+    print("Class sampling weights:")
 
-        if "im" not in data:
-            raise KeyError(
-                f"'im' key not found in hyperspectral file:\n{hsi_path}"
-            )
-
-        image = data["im"]
-
-        # ==================================================
-        # GET BOUNDING BOX
-        # ==================================================
-
-        x1 = int(row["x1"])
-        y1 = int(row["y1"])
-        x2 = int(row["x2"])
-        y2 = int(row["y2"])
-
-        # ==================================================
-        # VALIDATE BOUNDING BOX
-        # ==================================================
-
-        height, width, bands = image.shape
-
-        x1 = max(0, min(x1, width))
-        x2 = max(0, min(x2, width))
-
-        y1 = max(0, min(y1, height))
-        y2 = max(0, min(y2, height))
-
-        if x2 <= x1 or y2 <= y1:
-            raise ValueError(
-                f"Invalid bounding box at index {idx}: "
-                f"({x1}, {y1}, {x2}, {y2})"
-            )
-
-        # ==================================================
-        # CROP HYPERSPECTRAL PATCH
-        # ==================================================
-
-        patch = image[y1:y2, x1:x2, :]
-
-        # ==================================================
-        # CONVERT TO FLOAT32
-        # ==================================================
-
-        patch = patch.astype(np.float32)
-
-        # ==================================================
-        # NORMALIZATION
-        #
-        # Original HSI values are uint16.
-        # ==================================================
-
-        patch = patch / 65535.0
-
-        patch = np.clip(
-            patch,
-            0.0,
-            1.0
+    for class_id in range(NUM_CLASSES):
+        print(
+            f"Class {class_id}: "
+            f"{class_weights[class_id]:.8f}"
         )
 
-        # ==================================================
-        # HWC -> CHW
-        #
-        # Original:
-        # Height x Width x Bands
-        #
-        # Required:
-        # Bands x Height x Width
-        # ==================================================
 
-        patch = torch.from_numpy(patch)
+# ============================================================
+# DATA LOADERS
+# ============================================================
 
-        patch = patch.permute(
-            2,
-            0,
-            1
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=BATCH_SIZE,
+    sampler=train_sampler,
+    shuffle=shuffle_train,
+    num_workers=NUM_WORKERS,
+    pin_memory=torch.cuda.is_available()
+)
+
+val_loader = DataLoader(
+    val_dataset,
+    batch_size=BATCH_SIZE,
+    shuffle=False,
+    num_workers=NUM_WORKERS,
+    pin_memory=torch.cuda.is_available()
+)
+
+
+# ============================================================
+# CREATE MODEL
+# ============================================================
+
+print()
+print("-" * 65)
+print("Creating 3D-CNN model...")
+print("-" * 65)
+
+model = TerraSpectra3DCNN(
+    num_classes=NUM_CLASSES
+)
+
+model = model.to(device)
+
+
+# ============================================================
+# MODEL PARAMETERS
+# ============================================================
+
+total_parameters = sum(
+    p.numel()
+    for p in model.parameters()
+)
+
+trainable_parameters = sum(
+    p.numel()
+    for p in model.parameters()
+    if p.requires_grad
+)
+
+print()
+print("Total parameters     :", f"{total_parameters:,}")
+print("Trainable parameters :", f"{trainable_parameters:,}")
+
+
+# ============================================================
+# LOSS
+# ============================================================
+
+criterion = nn.CrossEntropyLoss()
+
+
+# ============================================================
+# OPTIMIZER
+# ============================================================
+
+optimizer = torch.optim.Adam(
+    model.parameters(),
+    lr=LEARNING_RATE
+)
+
+
+# ============================================================
+# TRAINING FUNCTION
+# ============================================================
+
+def train_one_epoch(
+    model,
+    loader,
+    criterion,
+    optimizer,
+    device
+):
+
+    model.train()
+
+    running_loss = 0.0
+    correct = 0
+    total = 0
+
+    for patches, labels in loader:
+
+        patches = patches.to(
+            device,
+            non_blocking=True
         )
 
-        # ==================================================
-        # RESIZE SPATIAL DIMENSIONS
-        #
-        # Expected output:
-        # Bands x 32 x 32
-        # ==================================================
-
-        patch = patch.unsqueeze(0)
-
-        patch = F.interpolate(
-            patch,
-            size=(32, 32),
-            mode="bilinear",
-            align_corners=False
+        labels = labels.to(
+            device,
+            non_blocking=True
         )
 
-        patch = patch.squeeze(0)
+        # Dataset output:
+        # [B, 20, 32, 32]
+        #
+        # 3D CNN input:
+        # [B, 1, 20, 32, 32]
 
-        # ==================================================
-        # DATA AUGMENTATION
-        # ==================================================
+        patches = patches.unsqueeze(1)
 
-        if self.augment:
+        optimizer.zero_grad()
 
-            # ------------------------------------------------
-            # Random horizontal flip
-            # ------------------------------------------------
+        outputs = model(patches)
 
-            if torch.rand(1).item() < 0.5:
+        loss = criterion(
+            outputs,
+            labels
+        )
 
-                patch = torch.flip(
-                    patch,
-                    dims=[2]
-                )
+        loss.backward()
 
-            # ------------------------------------------------
-            # Random vertical flip
-            # ------------------------------------------------
+        optimizer.step()
 
-            if torch.rand(1).item() < 0.5:
+        running_loss += (
+            loss.item() * labels.size(0)
+        )
 
-                patch = torch.flip(
-                    patch,
-                    dims=[1]
-                )
+        predictions = torch.argmax(
+            outputs,
+            dim=1
+        )
 
-            # ------------------------------------------------
-            # Random 90-degree rotation
-            # ------------------------------------------------
+        correct += (
+            predictions == labels
+        ).sum().item()
 
-            k = torch.randint(
-                0,
-                4,
-                (1,)
-            ).item()
+        total += labels.size(0)
 
-            if k > 0:
+    epoch_loss = running_loss / total
+    epoch_accuracy = correct / total
 
-                patch = torch.rot90(
-                    patch,
-                    k=k,
-                    dims=[1, 2]
-                )
-
-        # ==================================================
-        # LABEL
-        # ==================================================
-
-        label = int(row["class_id"])
-
-        return patch.float(), label
+    return epoch_loss, epoch_accuracy
 
 
-# ==========================================================
-# TEST DATASET
-# ==========================================================
+# ============================================================
+# VALIDATION FUNCTION
+# ============================================================
 
-if __name__ == "__main__":
+def validate(
+    model,
+    loader,
+    criterion,
+    device
+):
 
-    print("=" * 60)
-    print("TerraSpectra Dataset Test")
-    print("=" * 60)
+    model.eval()
 
-    dataset = TerraSpectraDataset(
-        csv_file="outputs/hyperspectral_patches.csv",
-        hsi_root="data/raw/hyperspectral/0",
-        augment=True
+    running_loss = 0.0
+    correct = 0
+    total = 0
+
+    all_predictions = []
+    all_labels = []
+
+    with torch.no_grad():
+
+        for patches, labels in loader:
+
+            patches = patches.to(
+                device,
+                non_blocking=True
+            )
+
+            labels = labels.to(
+                device,
+                non_blocking=True
+            )
+
+            patches = patches.unsqueeze(1)
+
+            outputs = model(patches)
+
+            loss = criterion(
+                outputs,
+                labels
+            )
+
+            running_loss += (
+                loss.item() * labels.size(0)
+            )
+
+            predictions = torch.argmax(
+                outputs,
+                dim=1
+            )
+
+            correct += (
+                predictions == labels
+            ).sum().item()
+
+            total += labels.size(0)
+
+            all_predictions.extend(
+                predictions.cpu().numpy()
+            )
+
+            all_labels.extend(
+                labels.cpu().numpy()
+            )
+
+    epoch_loss = running_loss / total
+    epoch_accuracy = correct / total
+
+    return (
+        epoch_loss,
+        epoch_accuracy,
+        np.array(all_predictions),
+        np.array(all_labels)
+    )
+
+
+# ============================================================
+# TRAINING LOOP
+# ============================================================
+
+best_val_accuracy = 0.0
+
+history = []
+
+
+print()
+print("=" * 65)
+print("STARTING TILE-LEVEL TRAINING")
+print("=" * 65)
+
+for epoch in range(1, EPOCHS + 1):
+
+    train_loss, train_accuracy = train_one_epoch(
+        model,
+        train_loader,
+        criterion,
+        optimizer,
+        device
+    )
+
+    (
+        val_loss,
+        val_accuracy,
+        predictions,
+        labels
+    ) = validate(
+        model,
+        val_loader,
+        criterion,
+        device
+    )
+
+    history.append(
+        {
+            "epoch": epoch,
+            "train_loss": train_loss,
+            "train_accuracy": train_accuracy,
+            "val_loss": val_loss,
+            "val_accuracy": val_accuracy
+        }
     )
 
     print()
-    print("Dataset samples:", len(dataset))
-
-    # ======================================================
-    # LOAD FIRST SAMPLE
-    # ======================================================
-
-    patch, label = dataset[0]
-
-    print()
-    print("First sample information")
-    print("-" * 40)
-
-    print("Tensor shape :", patch.shape)
-    print("Tensor dtype :", patch.dtype)
-    print("Tensor min   :", patch.min().item())
-    print("Tensor max   :", patch.max().item())
-    print("Tensor mean  :", patch.mean().item())
-    print("Label        :", label)
-
-    # ======================================================
-    # EXPECTED SHAPE CHECK
-    # ======================================================
-
-    assert patch.shape == torch.Size([20, 32, 32]), (
-        f"Unexpected tensor shape: {patch.shape}"
+    print(
+        f"Epoch [{epoch:02d}/{EPOCHS}]"
     )
 
-    assert patch.dtype == torch.float32, (
-        f"Unexpected tensor dtype: {patch.dtype}"
+    print(
+        f"Train Loss: {train_loss:.4f} | "
+        f"Train Acc: {train_accuracy * 100:.2f}%"
     )
 
-    assert 0.0 <= patch.min().item() <= 1.0, (
-        "Tensor contains values below 0"
+    print(
+        f"Val Loss:   {val_loss:.4f} | "
+        f"Val Acc:   {val_accuracy * 100:.2f}%"
     )
 
-    assert 0.0 <= patch.max().item() <= 1.0, (
-        "Tensor contains values above 1"
-    )
+    # ========================================================
+    # SAVE BEST MODEL
+    # ========================================================
 
-    print()
-    print("Shape check  : PASSED")
-    print("Dtype check  : PASSED")
-    print("Range check  : PASSED")
+    if val_accuracy > best_val_accuracy:
 
-    print()
-    print("=" * 60)
-    print("Dataset test completed successfully!")
-    print("=" * 60)
+        best_val_accuracy = val_accuracy
+
+        os.makedirs(
+            os.path.dirname(MODEL_OUTPUT),
+            exist_ok=True
+        )
+
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "val_accuracy": val_accuracy,
+                "num_classes": NUM_CLASSES
+            },
+            MODEL_OUTPUT
+        )
+
+        print()
+        print(
+            "✓ Best model saved!"
+        )
+
+        print(
+            f"  Validation accuracy: "
+            f"{val_accuracy * 100:.2f}%"
+        )
+
+        print(
+            f"  Path: {MODEL_OUTPUT}"
+        )
+
+
+# ============================================================
+# SAVE TRAINING HISTORY
+# ============================================================
+
+history_df = pd.DataFrame(history)
+
+history_path = (
+    "outputs/"
+    "tilesplit_training_history.csv"
+)
+
+history_df.to_csv(
+    history_path,
+    index=False
+)
+
+
+# ============================================================
+# FINAL RESULTS
+# ============================================================
+
+print()
+print("=" * 65)
+print("TILE-LEVEL TRAINING COMPLETED")
+print("=" * 65)
+
+print()
+print(
+    f"Best validation accuracy: "
+    f"{best_val_accuracy * 100:.2f}%"
+)
+
+print()
+print(
+    "Best model:"
+)
+
+print(
+    MODEL_OUTPUT
+)
+
+print()
+print(
+    "Training history:"
+)
+
+print(
+    history_path
+)
+
+print()
+print("=" * 65)
