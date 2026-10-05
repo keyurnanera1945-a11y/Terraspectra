@@ -6,25 +6,16 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-
-# ============================================================
-# PYTORCH
-# ============================================================
-
 try:
     import torch
     import torch.nn.functional as F
-
-    TORCH_AVAILABLE = True
-
 except ImportError:
     torch = None
     F = None
-    TORCH_AVAILABLE = False
 
 
 # ============================================================
-# PROJECT PATHS
+# PATHS
 # ============================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -33,40 +24,11 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-
-# ============================================================
-# MODEL IMPORT
-# ============================================================
-
-try:
-    from model_3dcnn import TerraSpectra3DCNN
-except ImportError:
-    TerraSpectra3DCNN = None
+from model_3dcnn import TerraSpectra3DCNN
 
 
-# ============================================================
-# PAGE CONFIG
-# ============================================================
+PATCH_CSV_PATH = PROJECT_ROOT / "outputs" / "hyperspectral_patches.csv"
 
-st.set_page_config(
-    page_title="TerraSpectra | AI Monitoring",
-    page_icon="🌱",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-
-# ============================================================
-# FILE PATHS
-# ============================================================
-
-PATCH_CSV_PATH = (
-    PROJECT_ROOT
-    / "outputs"
-    / "hyperspectral_patches.csv"
-)
-
-# Current prediction model
 TILESPLIT_MODEL_PATH = (
     PROJECT_ROOT
     / "outputs"
@@ -74,29 +36,20 @@ TILESPLIT_MODEL_PATH = (
     / "terraspectra_3dcnn_tilesplit_best.pt"
 )
 
-# Tile-level evaluation files
-TILESPLIT_CONFUSION_MATRIX_PATH = (
-    PROJECT_ROOT
-    / "outputs"
-    / "tilesplit_confusion_matrix.csv"
+TILESPLIT_CONFUSION_PATH = (
+    PROJECT_ROOT / "outputs" / "tilesplit_confusion_matrix.csv"
 )
 
-TILESPLIT_CLASSIFICATION_REPORT_PATH = (
-    PROJECT_ROOT
-    / "outputs"
-    / "tilesplit_classification_report.csv"
+TILESPLIT_REPORT_PATH = (
+    PROJECT_ROOT / "outputs" / "tilesplit_classification_report.csv"
 )
 
 TILESPLIT_PREDICTIONS_PATH = (
-    PROJECT_ROOT
-    / "outputs"
-    / "tilesplit_predictions.csv"
+    PROJECT_ROOT / "outputs" / "tilesplit_predictions.csv"
 )
 
 TILESPLIT_HISTORY_PATH = (
-    PROJECT_ROOT
-    / "outputs"
-    / "tilesplit_training_history.csv"
+    PROJECT_ROOT / "outputs" / "tilesplit_training_history.csv"
 )
 
 
@@ -114,27 +67,23 @@ EXPECTED_BANDS = 20
 PATCH_SIZE = 32
 
 WAVELENGTHS = [
-    420,
-    440,
-    500,
-    520,
-    540,
-    560,
-    580,
-    600,
-    620,
-    640,
-    660,
-    680,
-    700,
-    720,
-    740,
-    760,
-    770,
-    800,
-    850,
-    900,
+    420, 440, 500, 520, 540,
+    560, 580, 600, 620, 640,
+    660, 680, 700, 720, 740,
+    760, 770, 800, 850, 900
 ]
+
+
+# ============================================================
+# PAGE CONFIG
+# ============================================================
+
+st.set_page_config(
+    page_title="TerraSpectra AI",
+    page_icon="🌱",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 
 # ============================================================
@@ -145,93 +94,129 @@ st.markdown(
     """
     <style>
 
-    .stApp {
+    .main {
         background-color: #f7f9fc;
     }
 
-    section[data-testid="stSidebar"] {
-        background-color: #111827;
+    .block-container {
+        padding-top: 1.5rem;
+        padding-bottom: 2rem;
+        max-width: 1450px;
     }
 
-    section[data-testid="stSidebar"] * {
-        color: #f3f4f6;
-    }
-
-    .main-title {
-        font-size: 2.4rem;
-        font-weight: 750;
-        margin-bottom: 0.15rem;
-        color: #111827;
-    }
-
-    .subtitle {
-        font-size: 1rem;
-        color: #6b7280;
+    .hero {
+        padding: 1.5rem 1.8rem;
+        border-radius: 18px;
+        background: linear-gradient(
+            135deg,
+            #0f172a 0%,
+            #1e293b 55%,
+            #334155 100%
+        );
+        color: white;
         margin-bottom: 1.5rem;
     }
 
-    .section-title {
-        font-size: 1.45rem;
-        font-weight: 700;
-        color: #111827;
-        margin-top: 1rem;
-        margin-bottom: 0.5rem;
+    .hero h1 {
+        margin: 0;
+        font-size: 2.1rem;
     }
 
-    .info-card {
+    .hero p {
+        margin-top: 0.5rem;
+        color: #cbd5e1;
+        font-size: 1rem;
+    }
+
+    .metric-card {
+        padding: 1.2rem;
+        border-radius: 16px;
         background: white;
-        border: 1px solid #e5e7eb;
-        border-radius: 14px;
-        padding: 20px;
-        margin-bottom: 15px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+        min-height: 125px;
     }
 
-    .status-card {
-        background: white;
-        border-radius: 14px;
-        padding: 18px;
-        border: 1px solid #e5e7eb;
-        min-height: 120px;
-    }
-
-    .small-label {
-        color: #6b7280;
-        font-size: 0.82rem;
-        margin-bottom: 5px;
-    }
-
-    .big-value {
-        color: #111827;
-        font-size: 1.7rem;
-        font-weight: 700;
-    }
-
-    .model-badge {
-        display: inline-block;
-        padding: 6px 12px;
-        border-radius: 20px;
-        background: #e8f5e9;
-        color: #166534;
-        font-size: 0.82rem;
+    .metric-label {
+        color: #64748b;
+        font-size: 0.85rem;
         font-weight: 600;
     }
 
-    .warning-note {
-        background: #fff7ed;
-        border-left: 4px solid #f97316;
-        padding: 12px 15px;
-        border-radius: 8px;
-        margin: 12px 0;
+    .metric-value {
+        color: #0f172a;
+        font-size: 1.65rem;
+        font-weight: 750;
+        margin-top: 0.3rem;
     }
 
-    .footer {
-        margin-top: 40px;
-        padding-top: 20px;
-        border-top: 1px solid #e5e7eb;
-        color: #6b7280;
+    .metric-sub {
+        color: #64748b;
+        font-size: 0.78rem;
+        margin-top: 0.2rem;
+    }
+
+    .prediction-card {
+        padding: 1.5rem;
+        border-radius: 18px;
+        background: white;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 3px 12px rgba(15, 23, 42, 0.07);
         text-align: center;
-        font-size: 0.85rem;
+        min-height: 210px;
+    }
+
+    .prediction-title {
+        color: #64748b;
+        font-size: 0.9rem;
+        font-weight: 650;
+    }
+
+    .prediction-class {
+        color: #0f172a;
+        font-size: 1.8rem;
+        font-weight: 800;
+        margin-top: 0.7rem;
+    }
+
+    .confidence {
+        color: #2563eb;
+        font-size: 1.35rem;
+        font-weight: 750;
+        margin-top: 0.5rem;
+    }
+
+    .section-title {
+        font-size: 1.3rem;
+        font-weight: 750;
+        color: #0f172a;
+        margin-top: 1.2rem;
+        margin-bottom: 0.7rem;
+    }
+
+    .info-box {
+        padding: 1rem 1.2rem;
+        border-radius: 14px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        color: #475569;
+        line-height: 1.55;
+    }
+
+    .warning-box {
+        padding: 1rem 1.2rem;
+        border-radius: 14px;
+        background: #fff7ed;
+        border: 1px solid #fed7aa;
+        color: #9a3412;
+    }
+
+    .success-box {
+        padding: 1rem 1.2rem;
+        border-radius: 14px;
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        color: #166534;
     }
 
     </style>
@@ -241,42 +226,32 @@ st.markdown(
 
 
 # ============================================================
-# HELPER FUNCTIONS
+# HELPERS
 # ============================================================
 
 def find_column(df, candidates):
-    """Find a column using exact or partial matching."""
+    """Find the first matching column from candidate names."""
 
-    if df is None or df.empty:
-        return None
+    for candidate in candidates:
+        if candidate in df.columns:
+            return candidate
 
-    normalized = {
-        str(col).strip().lower(): col
+    lower_map = {
+        str(col).lower(): col
         for col in df.columns
     }
 
     for candidate in candidates:
-        key = candidate.strip().lower()
-
-        if key in normalized:
-            return normalized[key]
-
-    for col in df.columns:
-        col_lower = str(col).strip().lower()
-
-        for candidate in candidates:
-            if candidate.strip().lower() in col_lower:
-                return col
+        if candidate.lower() in lower_map:
+            return lower_map[candidate.lower()]
 
     return None
 
 
 def normalize_band_for_display(band):
     """
-    Normalize raw hyperspectral data to 0-1.
-
-    This fixes Streamlit errors such as:
-    Data is outside [0, 255] and clamp is not set.
+    Convert raw hyperspectral values into a safe
+    0-1 image for Streamlit display.
     """
 
     band = np.asarray(
@@ -284,23 +259,19 @@ def normalize_band_for_display(band):
         dtype=np.float32
     )
 
-    if band.ndim != 2:
-        raise ValueError(
-            f"Expected 2D band, received {band.shape}"
-        )
-
     if not np.isfinite(band).all():
         raise ValueError(
             "Spectral band contains NaN or infinite values."
         )
 
-    min_value = float(band.min())
-    max_value = float(band.max())
+    min_val = float(band.min())
+    max_val = float(band.max())
 
-    if max_value > min_value:
+    if max_val > min_val:
         band = (
-            (band - min_value)
-            / (max_value - min_value)
+            band - min_val
+        ) / (
+            max_val - min_val
         )
     else:
         band = np.zeros_like(band)
@@ -312,150 +283,94 @@ def normalize_band_for_display(band):
     )
 
 
-@st.cache_data
-def load_patch_dataframe():
-
+def load_patch_data():
     if not PATCH_CSV_PATH.exists():
-        return None
+        return pd.DataFrame()
 
     try:
-        return pd.read_csv(
-            PATCH_CSV_PATH
-        )
-
+        return pd.read_csv(PATCH_CSV_PATH)
     except Exception:
-        return None
+        return pd.DataFrame()
 
 
-@st.cache_data
-def load_tilesplit_confusion_matrix():
-
-    if not TILESPLIT_CONFUSION_MATRIX_PATH.exists():
-        return None
-
-    try:
-
-        df = pd.read_csv(
-            TILESPLIT_CONFUSION_MATRIX_PATH,
-            index_col=0
-        )
-
-        df = df.apply(
-            pd.to_numeric,
-            errors="coerce"
-        ).fillna(0)
-
-        return df.astype(int)
-
-    except Exception:
-        return None
-
-
-@st.cache_data
-def load_tilesplit_report():
-
-    if not TILESPLIT_CLASSIFICATION_REPORT_PATH.exists():
-        return None
-
-    try:
-
-        df = pd.read_csv(
-            TILESPLIT_CLASSIFICATION_REPORT_PATH,
-            index_col=0
-        )
-
-        df.index = df.index.astype(str)
-
-        return df
-
-    except Exception:
-        return None
-
-
-@st.cache_data
-def load_tilesplit_predictions():
-
+def load_predictions():
     if not TILESPLIT_PREDICTIONS_PATH.exists():
-        return None
+        return pd.DataFrame()
 
     try:
         return pd.read_csv(
             TILESPLIT_PREDICTIONS_PATH
         )
-
     except Exception:
-        return None
+        return pd.DataFrame()
 
 
-@st.cache_data
-def load_tilesplit_history():
+def load_report():
+    if not TILESPLIT_REPORT_PATH.exists():
+        return pd.DataFrame()
 
+    try:
+        return pd.read_csv(
+            TILESPLIT_REPORT_PATH,
+            index_col=0
+        )
+    except Exception:
+        return pd.DataFrame()
+
+
+def load_history():
     if not TILESPLIT_HISTORY_PATH.exists():
-        return None
+        return pd.DataFrame()
 
     try:
         return pd.read_csv(
             TILESPLIT_HISTORY_PATH
         )
+    except Exception:
+        return pd.DataFrame()
 
+
+def load_confusion_matrix():
+    if not TILESPLIT_CONFUSION_PATH.exists():
+        return pd.DataFrame()
+
+    try:
+        return pd.read_csv(
+            TILESPLIT_CONFUSION_PATH,
+            index_col=0
+        )
+    except Exception:
+        return pd.DataFrame()
+
+
+def get_report_value(report, row, column):
+    if report.empty:
+        return None
+
+    try:
+        value = report.loc[row, column]
+        return float(value)
     except Exception:
         return None
 
 
-def get_report_value(
-    report,
-    row_name,
-    column_name
-):
-
-    if report is None:
-        return None
-
-    if row_name not in report.index:
-        return None
-
-    if column_name not in report.columns:
-        return None
-
-    value = pd.to_numeric(
-        report.loc[
-            row_name,
-            column_name
-        ],
-        errors="coerce"
-    )
-
-    if pd.isna(value):
-        return None
-
-    return float(value)
-
-
 def percentage_value(value):
-
     if value is None:
-        return None
+        return "N/A"
 
-    if abs(value) <= 1.5:
-        return value * 100
+    return f"{value * 100:.2f}%"
 
-    return value
-
-
-# ============================================================
-# HYPERSPECTRAL PREPROCESSING
-# ============================================================
 
 def prepare_hyperspectral_tensor(hsi):
     """
-    Convert H x W x Bands HSI into:
+    Convert HSI from:
+        H x W x Bands
 
-        [1, 1, 20, 32, 32]
-
-    for TerraSpectra 3D-CNN.
+    into model input:
+        1 x 1 x Bands x 32 x 32
     """
 
-    if not TORCH_AVAILABLE:
+    if torch is None or F is None:
         raise RuntimeError(
             "PyTorch is not installed in the current environment."
         )
@@ -467,23 +382,23 @@ def prepare_hyperspectral_tensor(hsi):
 
     if hsi.ndim != 3:
         raise ValueError(
-            "Expected HSI with shape "
-            "(Height, Width, Bands). "
-            f"Received {hsi.shape}."
+            "Expected hyperspectral image with 3 dimensions."
         )
 
-    if hsi.shape[2] != EXPECTED_BANDS:
+    height, width, bands = hsi.shape
+
+    if bands != EXPECTED_BANDS:
         raise ValueError(
             f"Expected {EXPECTED_BANDS} spectral bands, "
-            f"but uploaded file contains {hsi.shape[2]}."
+            f"but received {bands}."
         )
 
     if not np.isfinite(hsi).all():
         raise ValueError(
-            "Hyperspectral data contains NaN or infinite values."
+            "Hyperspectral image contains NaN or infinite values."
         )
 
-    # Same normalization used by the dataset.
+    # Normalize uint16-style hyperspectral values.
     hsi = hsi / 65535.0
 
     hsi = np.clip(
@@ -493,21 +408,22 @@ def prepare_hyperspectral_tensor(hsi):
     )
 
     # HWC -> CHW
-    tensor = torch.from_numpy(
-        hsi
-    ).permute(
-        2,
-        0,
-        1
+    hsi = np.transpose(
+        hsi,
+        (2, 0, 1)
     )
 
-    # [Bands, H, W]
-    # ->
-    # [1, 1, Bands, H, W]
-    tensor = tensor.unsqueeze(0).unsqueeze(0)
+    tensor = torch.from_numpy(
+        hsi
+    ).float()
 
-    # Resize spatial dimensions.
-    # Spectral dimension remains 20.
+    # [Bands, H, W]
+    tensor = tensor.unsqueeze(0)
+
+    # [1, Bands, H, W]
+    tensor = tensor.unsqueeze(0)
+
+    # [1, 1, Bands, H, W]
     tensor = F.interpolate(
         tensor,
         size=(
@@ -516,331 +432,160 @@ def prepare_hyperspectral_tensor(hsi):
             PATCH_SIZE
         ),
         mode="trilinear",
-        align_corners=False
+        align_corners=False,
     )
 
     return tensor
 
 
-# ============================================================
-# ROBUST MODEL CREATION
-# ============================================================
-
 def create_terraspectra_model():
     """
-    Create TerraSpectra3DCNN using the ACTUAL constructor
-    available in src/model_3dcnn.py.
-
-    This intentionally does NOT assume that the constructor
-    accepts 'in_channels'.
+    Create TerraSpectra3DCNN while remaining compatible
+    with the current constructor implementation.
     """
 
-    if TerraSpectra3DCNN is None:
-        raise RuntimeError(
-            "Could not import TerraSpectra3DCNN from "
-            "src/model_3dcnn.py."
-        )
+    signature = inspect.signature(
+        TerraSpectra3DCNN
+    )
+
+    parameters = signature.parameters
+
+    kwargs = {}
+
+    if "num_classes" in parameters:
+        kwargs["num_classes"] = 3
+
+    if "in_channels" in parameters:
+        kwargs["in_channels"] = 1
+
+    if "input_channels" in parameters:
+        kwargs["input_channels"] = 1
+
+    if "channels" in parameters:
+        kwargs["channels"] = 1
 
     try:
-
-        signature = inspect.signature(
-            TerraSpectra3DCNN
-        )
-
-        parameters = signature.parameters
-
-        kwargs = {}
-
-        # Only pass parameters if they actually exist.
-        if "num_classes" in parameters:
-            kwargs["num_classes"] = 3
-
-        if "in_channels" in parameters:
-            kwargs["in_channels"] = 1
-
-        if "input_channels" in parameters:
-            kwargs["input_channels"] = 1
-
-        if "channels" in parameters:
-            kwargs["channels"] = 1
-
-        model = TerraSpectra3DCNN(
+        return TerraSpectra3DCNN(
             **kwargs
         )
 
-        return model
-
     except TypeError:
+        return TerraSpectra3DCNN()
 
-        # Final fallback for a constructor with no arguments.
-        try:
-            return TerraSpectra3DCNN()
-
-        except Exception as exc:
-
-            raise RuntimeError(
-                "Could not create TerraSpectra3DCNN using the "
-                "constructor in src/model_3dcnn.py. "
-                f"Original error: {exc}"
-            ) from exc
-
-
-# ============================================================
-# LOAD TILE-LEVEL MODEL
-# ============================================================
 
 @st.cache_resource
 def load_prediction_model():
-    """
-    Load:
 
-    outputs/models/
-    terraspectra_3dcnn_tilesplit_best.pt
-
-    This is the tile-level model used by the Prediction page.
-    """
-
-    if not TORCH_AVAILABLE:
+    if torch is None:
         raise RuntimeError(
-            "PyTorch is not installed."
+            "PyTorch is not available."
         )
 
     if not TILESPLIT_MODEL_PATH.exists():
         raise FileNotFoundError(
-            "Tile-level model was not found:\n"
+            f"Model file not found:\n"
             f"{TILESPLIT_MODEL_PATH}"
         )
 
-    # Create model using actual constructor.
     model = create_terraspectra_model()
 
-    # Load checkpoint.
     try:
-
         checkpoint = torch.load(
             TILESPLIT_MODEL_PATH,
             map_location="cpu",
-            weights_only=False
+            weights_only=False,
         )
-
     except TypeError:
-
         checkpoint = torch.load(
             TILESPLIT_MODEL_PATH,
-            map_location="cpu"
+            map_location="cpu",
         )
 
-    # --------------------------------------------------------
-    # Detect checkpoint format.
-    # --------------------------------------------------------
+    if isinstance(checkpoint, dict):
 
-    if (
-        isinstance(checkpoint, dict)
-        and "model_state_dict" in checkpoint
-    ):
+        if "model_state_dict" in checkpoint:
+            state_dict = checkpoint[
+                "model_state_dict"
+            ]
 
-        state_dict = checkpoint[
-            "model_state_dict"
-        ]
+        elif "state_dict" in checkpoint:
+            state_dict = checkpoint[
+                "state_dict"
+            ]
 
-    elif (
-        isinstance(checkpoint, dict)
-        and "state_dict" in checkpoint
-    ):
-
-        state_dict = checkpoint[
-            "state_dict"
-        ]
+        else:
+            state_dict = checkpoint
 
     else:
-
         state_dict = checkpoint
 
-    # --------------------------------------------------------
-    # Handle DataParallel checkpoints.
-    # --------------------------------------------------------
+    cleaned_state_dict = {}
 
-    if isinstance(state_dict, dict):
+    for key, value in state_dict.items():
 
-        cleaned_state_dict = {}
+        new_key = key
 
-        for key, value in state_dict.items():
+        if new_key.startswith("module."):
+            new_key = new_key[
+                len("module.") :
+            ]
 
-            if key.startswith("module."):
-                new_key = key[
-                    len("module.") :
-                ]
+        cleaned_state_dict[
+            new_key
+        ] = value
 
-            else:
-                new_key = key
-
-            cleaned_state_dict[
-                new_key
-            ] = value
-
-        state_dict = cleaned_state_dict
-
-    # --------------------------------------------------------
-    # Load weights.
-    # --------------------------------------------------------
-
-    try:
-
-        model.load_state_dict(
-            state_dict,
-            strict=True
-        )
-
-    except RuntimeError as exc:
-
-        raise RuntimeError(
-            "The tile-level model checkpoint does not match "
-            "the TerraSpectra3DCNN architecture.\n\n"
-            "Make sure src/model_3dcnn.py is the same model "
-            "used during tile-level training.\n\n"
-            f"Details:\n{exc}"
-        ) from exc
+    model.load_state_dict(
+        cleaned_state_dict,
+        strict=True
+    )
 
     model.eval()
 
     return model
 
 
-# ============================================================
-# PREDICTION
-# ============================================================
+def run_prediction(hsi):
 
-def get_model_prediction(
-    model,
-    tensor
-):
+    tensor = prepare_hyperspectral_tensor(
+        hsi
+    )
 
-    if not TORCH_AVAILABLE:
-        raise RuntimeError(
-            "PyTorch is unavailable."
-        )
+    model = load_prediction_model()
 
     with torch.no_grad():
 
-        output = model(
+        logits = model(
             tensor
         )
 
         probabilities = torch.softmax(
-            output,
+            logits,
             dim=1
         )[0]
 
-    predicted_class = int(
-        torch.argmax(
-            probabilities
-        ).item()
+        predicted_class = int(
+            torch.argmax(
+                probabilities
+            ).item()
+        )
+
+        confidence = float(
+            probabilities[
+                predicted_class
+            ].item()
+        )
+
+    probability_values = (
+        probabilities
+        .cpu()
+        .numpy()
     )
 
     return (
         predicted_class,
-        probabilities.cpu().numpy()
-    )
-
-
-# ============================================================
-# CLASSIFICATION REPORT TABLE
-# ============================================================
-
-def create_tile_classification_table(
-    report
-):
-
-    if report is None:
-        return None
-
-    rows = []
-
-    for class_id in range(3):
-
-        row_name = str(
-            class_id
-        )
-
-        if row_name not in report.index:
-            continue
-
-        precision = get_report_value(
-            report,
-            row_name,
-            "precision"
-        )
-
-        recall = get_report_value(
-            report,
-            row_name,
-            "recall"
-        )
-
-        f1 = get_report_value(
-            report,
-            row_name,
-            "f1-score"
-        )
-
-        support = get_report_value(
-            report,
-            row_name,
-            "support"
-        )
-
-        rows.append(
-            {
-                "Class": CLASS_NAMES[
-                    class_id
-                ],
-
-                "Precision (%)": (
-                    round(
-                        percentage_value(
-                            precision
-                        ),
-                        2
-                    )
-                    if precision is not None
-                    else None
-                ),
-
-                "Recall (%)": (
-                    round(
-                        percentage_value(
-                            recall
-                        ),
-                        2
-                    )
-                    if recall is not None
-                    else None
-                ),
-
-                "F1 Score (%)": (
-                    round(
-                        percentage_value(
-                            f1
-                        ),
-                        2
-                    )
-                    if f1 is not None
-                    else None
-                ),
-
-                "Support": (
-                    int(support)
-                    if support is not None
-                    else None
-                ),
-            }
-        )
-
-    if not rows:
-        return None
-
-    return pd.DataFrame(
-        rows
+        confidence,
+        probability_values,
+        tensor,
     )
 
 
@@ -848,77 +593,76 @@ def create_tile_classification_table(
 # SIDEBAR
 # ============================================================
 
-with st.sidebar:
+st.sidebar.markdown(
+    """
+    <div style="
+        font-size: 1.45rem;
+        font-weight: 800;
+        margin-bottom: 0.2rem;
+    ">
+        🌱 TerraSpectra
+    </div>
 
-    st.markdown(
-        """
-        <div style="
-            font-size:1.65rem;
-            font-weight:750;
-            margin-bottom:2px;
-        ">
-            🌱 TerraSpectra
-        </div>
+    <div style="
+        color: #64748b;
+        font-size: 0.85rem;
+        margin-bottom: 1rem;
+    ">
+        Hyperspectral AI Monitoring
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-        <div style="
-            font-size:0.85rem;
-            color:#9ca3af;
-            margin-bottom:25px;
-        ">
-            Hyperspectral AI Monitoring
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+page = st.sidebar.radio(
+    "Navigation",
+    [
+        "Overview",
+        "Data Explorer",
+        "Spectral Analysis",
+        "Model Performance",
+        "Prediction",
+        "Monitoring",
+    ],
+)
 
-    page = st.radio(
-        "Navigation",
-        [
-            "Overview",
-            "Data Explorer",
-            "Spectral Analysis",
-            "Model Performance",
-            "Prediction",
-            "Monitoring",
-        ]
-    )
+st.sidebar.markdown("---")
 
-    st.markdown("---")
-
-    st.markdown(
-        """
-        <div style="
-            font-size:0.78rem;
-            color:#9ca3af;
-            line-height:1.6;
-        ">
-        <b>AI Model</b><br>
-        Tile-Level 3D-CNN<br><br>
-
-        <b>Input</b><br>
-        20-band hyperspectral imagery<br><br>
-
-        <b>Patch Size</b><br>
-        32 × 32 pixels
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+st.sidebar.caption(
+    "3D-CNN • Hyperspectral Imaging • Potato Disease Analysis"
+)
 
 
 # ============================================================
-# LOAD DASHBOARD DATA
+# LOAD DATA
 # ============================================================
 
-patch_df = load_patch_dataframe()
+patch_df = load_patch_data()
+prediction_df = load_predictions()
+report_df = load_report()
+history_df = load_history()
+confusion_df = load_confusion_matrix()
 
-tile_report = load_tilesplit_report()
 
-tile_cm = load_tilesplit_confusion_matrix()
+# ============================================================
+# HERO
+# ============================================================
 
-tile_predictions = load_tilesplit_predictions()
+st.markdown(
+    """
+    <div class="hero">
 
-tile_history = load_tilesplit_history()
+        <h1>🌱 TerraSpectra AI</h1>
+
+        <p>
+            Hyperspectral potato disease monitoring
+            powered by a tile-level 3D Convolutional Neural Network.
+        </p>
+
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # ============================================================
@@ -927,171 +671,94 @@ tile_history = load_tilesplit_history()
 
 if page == "Overview":
 
-    st.markdown(
-        '<div class="main-title">TerraSpectra</div>',
-        unsafe_allow_html=True
+    st.subheader("System Overview")
+
+    total_tiles = 1115
+    total_bands = EXPECTED_BANDS
+    total_patches = (
+        len(patch_df)
+        if not patch_df.empty
+        else 8688
     )
 
-    st.markdown(
-        """
-        <div class="subtitle">
-            AI-powered hyperspectral analysis for early potato
-            disease monitoring.
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    validation_samples = 1725
 
-    col1, col2, col3, col4 = st.columns(4)
+    accuracy = 0.9078
 
-    with col1:
-        st.metric(
+    cols = st.columns(4)
+
+    metrics = [
+        (
             "HSI Tiles",
-            "1,115"
-        )
-
-    with col2:
-        st.metric(
+            f"{total_tiles:,}",
+            "Hyperspectral image tiles",
+        ),
+        (
             "Spectral Bands",
-            "20"
-        )
-
-    with col3:
-        st.metric(
+            str(total_bands),
+            "Bands per HSI tile",
+        ),
+        (
             "Extracted Patches",
-            "8,688"
-        )
+            f"{total_patches:,}",
+            "Training-ready patches",
+        ),
+        (
+            "Validation Accuracy",
+            f"{accuracy * 100:.2f}%",
+            "Tile-level 3D-CNN",
+        ),
+    ]
 
-    with col4:
-        st.metric(
-            "Validation Samples",
-            "1,725"
+    for col, metric in zip(
+        cols,
+        metrics
+    ):
+
+        label, value, sub = metric
+
+        col.markdown(
+            f"""
+            <div class="metric-card">
+
+                <div class="metric-label">
+                    {label}
+                </div>
+
+                <div class="metric-value">
+                    {value}
+                </div>
+
+                <div class="metric-sub">
+                    {sub}
+                </div>
+
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
     st.markdown(
         '<div class="section-title">Current AI Model</div>',
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
-
-    model_col1, model_col2 = st.columns(
-        [2, 1]
-    )
-
-    with model_col1:
-
-        st.markdown(
-            """
-            <div class="info-card">
-
-            <span class="model-badge">
-            TILE-LEVEL 3D-CNN
-            </span>
-
-            <h3>
-            Hyperspectral Disease Classifier
-            </h3>
-
-            <p style="color:#6b7280;">
-            The current prediction system uses the model trained
-            using a tile-level train/validation split.
-            </p>
-
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    with model_col2:
-
-        tile_accuracy = get_report_value(
-            tile_report,
-            "accuracy",
-            "f1-score"
-        )
-
-        if tile_accuracy is not None:
-
-            st.metric(
-                "Validation Accuracy",
-                f"{percentage_value(tile_accuracy):.2f}%"
-            )
-
-        else:
-
-            st.metric(
-                "Validation Accuracy",
-                "90.78%"
-            )
-
-        st.metric(
-            "Model Parameters",
-            "18,243"
-        )
 
     st.markdown(
-        '<div class="section-title">Project Summary</div>',
-        unsafe_allow_html=True
+        """
+        <div class="info-box">
+
+        <b>Model:</b> Tile-Level 3D-CNN<br>
+        <b>Input:</b> 20-band hyperspectral tile<br>
+        <b>Input resolution:</b> 32 × 32<br>
+        <b>Output classes:</b> 3<br>
+        <b>Validation samples:</b> 1,725<br>
+        <b>Best validation accuracy:</b> 90.78%<br>
+        <b>Parameters:</b> 18,243
+
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-
-    summary_col1, summary_col2 = st.columns(2)
-
-    with summary_col1:
-
-        st.markdown(
-            """
-            <div class="info-card">
-
-            <h4>Hyperspectral Input</h4>
-
-            <p style="color:#6b7280;">
-            Each image contains 20 spectral bands covering
-            visible and near-infrared wavelengths.
-            </p>
-
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    with summary_col2:
-
-        st.markdown(
-            """
-            <div class="info-card">
-
-            <h4>AI Classification</h4>
-
-            <p style="color:#6b7280;">
-            The 3D-CNN learns spatial and spectral patterns
-            simultaneously and predicts three classes.
-            </p>
-
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    class_table = create_tile_classification_table(
-        tile_report
-    )
-
-    if class_table is not None:
-
-        st.markdown(
-            '<div class="section-title">Validation Class Performance</div>',
-            unsafe_allow_html=True
-        )
-
-        st.dataframe(
-            class_table,
-            width="stretch",
-            hide_index=True
-        )
-
-        st.info(
-            "The current evaluation shows that Disease Class 2 "
-            "requires further model improvement."
-        )
 
 
 # ============================================================
@@ -1100,48 +767,24 @@ if page == "Overview":
 
 elif page == "Data Explorer":
 
-    st.markdown(
-        '<div class="main-title">Data Explorer</div>',
-        unsafe_allow_html=True
-    )
+    st.subheader("Hyperspectral Dataset Explorer")
 
-    st.markdown(
-        """
-        <div class="subtitle">
-            Explore extracted hyperspectral patches and
-            class distribution.
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    if patch_df.empty:
 
-    if patch_df is None:
-
-        st.error(
-            "Patch metadata file was not found:\n"
-            f"{PATCH_CSV_PATH}"
+        st.warning(
+            "Patch dataset CSV was not found."
         )
 
     else:
 
-        st.metric(
-            "Total Patch Samples",
-            f"{len(patch_df):,}"
-        )
-
-        st.markdown(
-            '<div class="section-title">Dataset Information</div>',
-            unsafe_allow_html=True
+        st.write(
+            f"Dataset contains "
+            f"**{len(patch_df):,} extracted patches**."
         )
 
         st.dataframe(
             patch_df.head(100),
-            width="stretch"
-        )
-
-        st.markdown(
-            '<div class="section-title">Class Distribution</div>',
-            unsafe_allow_html=True
+            use_container_width=True,
         )
 
         label_column = find_column(
@@ -1150,13 +793,18 @@ elif page == "Data Explorer":
                 "label",
                 "class",
                 "target",
-                "class_id"
-            ]
+                "disease",
+            ],
         )
 
-        if label_column is not None:
+        if label_column:
 
-            class_counts = (
+            st.markdown(
+                '<div class="section-title">Class Distribution</div>',
+                unsafe_allow_html=True,
+            )
+
+            distribution = (
                 patch_df[
                     label_column
                 ]
@@ -1164,36 +812,8 @@ elif page == "Data Explorer":
                 .sort_index()
             )
 
-            class_distribution = pd.DataFrame(
-                {
-                    "Class": [
-                        CLASS_NAMES.get(
-                            int(index),
-                            str(index)
-                        )
-                        for index in class_counts.index
-                    ],
-
-                    "Samples": class_counts.values
-                }
-            )
-
             st.bar_chart(
-                class_distribution.set_index(
-                    "Class"
-                )
-            )
-
-            st.dataframe(
-                class_distribution,
-                width="stretch",
-                hide_index=True
-            )
-
-        else:
-
-            st.warning(
-                "Could not identify the class column."
+                distribution
             )
 
 
@@ -1203,150 +823,95 @@ elif page == "Data Explorer":
 
 elif page == "Spectral Analysis":
 
-    st.markdown(
-        '<div class="main-title">Spectral Analysis</div>',
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        """
-        <div class="subtitle">
-            Inspect hyperspectral bands and their spectral
-            characteristics.
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    st.subheader("Spectral Analysis")
 
     uploaded_file = st.file_uploader(
         "Upload a hyperspectral .npz file",
         type=["npz"],
-        key="spectral_npz"
+        key="spectral_upload",
     )
 
     if uploaded_file is not None:
 
         try:
 
-            npz_data = np.load(
+            data = np.load(
                 uploaded_file
             )
 
-            if "im" not in npz_data:
+            if "im" not in data:
 
                 st.error(
-                    "The uploaded NPZ file does not contain "
-                    "the expected 'im' array."
+                    "The uploaded NPZ file does not contain an 'im' array."
                 )
 
             else:
 
-                hsi = npz_data["im"]
+                hsi = data["im"]
 
                 if hsi.ndim != 3:
 
                     st.error(
-                        f"Expected HSI shape (H, W, Bands), "
-                        f"received {hsi.shape}."
-                    )
-
-                elif hsi.shape[2] != EXPECTED_BANDS:
-
-                    st.error(
-                        f"Expected {EXPECTED_BANDS} bands, "
-                        f"received {hsi.shape[2]}."
+                        "Expected a 3-dimensional hyperspectral image."
                     )
 
                 else:
 
+                    height, width, bands = hsi.shape
+
                     st.success(
                         f"Loaded HSI: "
-                        f"{hsi.shape[0]} × "
-                        f"{hsi.shape[1]} × "
-                        f"{hsi.shape[2]}"
+                        f"{height} × {width} × {bands}"
                     )
 
-                    selected_band = st.slider(
+                    band_number = st.slider(
                         "Select spectral band",
-                        0,
-                        EXPECTED_BANDS - 1,
-                        0
+                        min_value=0,
+                        max_value=bands - 1,
+                        value=0,
                     )
 
                     display_band = normalize_band_for_display(
-                        hsi[
-                            :,
-                            :,
-                            selected_band
-                        ]
+                        hsi[:, :, band_number]
                     )
 
-                    wavelength = WAVELENGTHS[
-                        selected_band
-                    ]
-
-                    st.image(
-                        display_band,
-                        caption=(
-                            f"Band {selected_band + 1} "
-                            f"• approximately {wavelength} nm"
-                        ),
-                        width="stretch"
+                    col1, col2 = st.columns(
+                        2
                     )
-
-                    band_values = np.asarray(
-                        hsi[
-                            :,
-                            :,
-                            selected_band
-                        ],
-                        dtype=np.float32
-                    )
-
-                    col1, col2, col3 = st.columns(3)
 
                     with col1:
 
-                        st.metric(
-                            "Minimum",
-                            f"{band_values.min():.2f}"
+                        st.image(
+                            display_band,
+                            caption=(
+                                f"Band {band_number + 1} "
+                                f"({WAVELENGTHS[band_number]} nm)"
+                                if band_number < len(WAVELENGTHS)
+                                else f"Band {band_number + 1}"
+                            ),
+                            use_container_width=True,
                         )
 
                     with col2:
 
-                        st.metric(
-                            "Maximum",
-                            f"{band_values.max():.2f}"
+                        spectral_profile = hsi.mean(
+                            axis=(0, 1)
                         )
 
-                    with col3:
-
-                        st.metric(
-                            "Mean",
-                            f"{band_values.mean():.2f}"
+                        spectral_df = pd.DataFrame(
+                            {
+                                "Wavelength (nm)": WAVELENGTHS[
+                                    :bands
+                                ],
+                                "Mean Intensity": spectral_profile,
+                            }
                         )
 
-                    st.markdown(
-                        '<div class="section-title">Spectral Profile</div>',
-                        unsafe_allow_html=True
-                    )
-
-                    mean_spectrum = hsi.mean(
-                        axis=(0, 1)
-                    )
-
-                    spectral_df = pd.DataFrame(
-                        {
-                            "Wavelength (nm)": WAVELENGTHS,
-                            "Mean Intensity": mean_spectrum
-                        }
-                    )
-
-                    st.line_chart(
-                        spectral_df.set_index(
-                            "Wavelength (nm)"
+                        st.line_chart(
+                            spectral_df.set_index(
+                                "Wavelength (nm)"
+                            )
                         )
-                    )
 
         except Exception as exc:
 
@@ -1361,693 +926,639 @@ elif page == "Spectral Analysis":
 
 elif page == "Model Performance":
 
-    st.markdown(
-        '<div class="main-title">Model Performance</div>',
-        unsafe_allow_html=True
-    )
+    st.subheader("Tile-Level 3D-CNN Performance")
 
-    st.markdown(
-        """
-        <div class="subtitle">
-            Evaluation results for the tile-level 3D-CNN classifier.
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    cols = st.columns(4)
 
-    if TILESPLIT_MODEL_PATH.exists():
+    performance_metrics = [
+        (
+            "Accuracy",
+            "90.78%",
+            "Validation",
+        ),
+        (
+            "Class 0 Recall",
+            "96.48%",
+            "Healthy / Normal",
+        ),
+        (
+            "Class 1 Recall",
+            "44.29%",
+            "Disease Class 1",
+        ),
+        (
+            "Class 2 Recall",
+            "0.00%",
+            "Disease Class 2",
+        ),
+    ]
 
-        st.success(
-            "Tile-level prediction model is available."
-        )
+    for col, metric in zip(
+        cols,
+        performance_metrics
+    ):
 
-    else:
+        label, value, sub = metric
 
-        st.error(
-            "Tile-level model file was not found:\n"
-            f"{TILESPLIT_MODEL_PATH}"
-        )
+        col.markdown(
+            f"""
+            <div class="metric-card">
 
-    accuracy = get_report_value(
-        tile_report,
-        "accuracy",
-        "f1-score"
-    )
+                <div class="metric-label">
+                    {label}
+                </div>
 
-    macro_f1 = get_report_value(
-        tile_report,
-        "macro avg",
-        "f1-score"
-    )
+                <div class="metric-value">
+                    {value}
+                </div>
 
-    weighted_f1 = get_report_value(
-        tile_report,
-        "weighted avg",
-        "f1-score"
-    )
+                <div class="metric-sub">
+                    {sub}
+                </div>
 
-    validation_count = (
-        len(tile_predictions)
-        if tile_predictions is not None
-        else 1725
-    )
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-
-        st.metric(
-            "Validation Accuracy",
-            (
-                f"{percentage_value(accuracy):.2f}%"
-                if accuracy is not None
-                else "90.78%"
-            )
-        )
-
-    with col2:
-
-        st.metric(
-            "Macro F1",
-            (
-                f"{percentage_value(macro_f1):.2f}%"
-                if macro_f1 is not None
-                else "N/A"
-            )
-        )
-
-    with col3:
-
-        st.metric(
-            "Weighted F1",
-            (
-                f"{percentage_value(weighted_f1):.2f}%"
-                if weighted_f1 is not None
-                else "N/A"
-            )
-        )
-
-    with col4:
-
-        st.metric(
-            "Validation Samples",
-            f"{validation_count:,}"
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
     st.markdown(
-        '<div class="section-title">Class-Level Performance</div>',
-        unsafe_allow_html=True
+        '<div class="section-title">Classification Report</div>',
+        unsafe_allow_html=True,
     )
 
-    class_table = create_tile_classification_table(
-        tile_report
-    )
-
-    if class_table is not None:
+    if not report_df.empty:
 
         st.dataframe(
-            class_table,
-            width="stretch",
-            hide_index=True
-        )
-
-        chart_data = class_table[
-            [
-                "Class",
-                "Precision (%)",
-                "Recall (%)",
-                "F1 Score (%)"
-            ]
-        ].set_index(
-            "Class"
-        )
-
-        st.bar_chart(
-            chart_data
+            report_df,
+            use_container_width=True,
         )
 
     st.markdown(
         '<div class="section-title">Confusion Matrix</div>',
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
-    if tile_cm is not None:
-
-        cm_display = tile_cm.copy()
-
-        if cm_display.shape == (3, 3):
-
-            cm_display.index = [
-                CLASS_NAMES[0],
-                CLASS_NAMES[1],
-                CLASS_NAMES[2]
-            ]
-
-            cm_display.columns = [
-                CLASS_NAMES[0],
-                CLASS_NAMES[1],
-                CLASS_NAMES[2]
-            ]
+    if not confusion_df.empty:
 
         st.dataframe(
-            cm_display,
-            width="stretch"
+            confusion_df,
+            use_container_width=True,
         )
-
-        row_totals = tile_cm.sum(
-            axis=1
-        ).replace(
-            0,
-            np.nan
-        )
-
-        normalized_cm = (
-            tile_cm
-            .div(
-                row_totals,
-                axis=0
-            )
-            * 100
-        )
-
-        if normalized_cm.shape == (3, 3):
-
-            normalized_cm.index = [
-                CLASS_NAMES[0],
-                CLASS_NAMES[1],
-                CLASS_NAMES[2]
-            ]
-
-            normalized_cm.columns = [
-                CLASS_NAMES[0],
-                CLASS_NAMES[1],
-                CLASS_NAMES[2]
-            ]
-
-        st.markdown(
-            "#### Normalized Confusion Matrix (%)"
-        )
-
-        st.dataframe(
-            normalized_cm.round(2),
-            width="stretch"
-        )
-
-    else:
-
-        st.warning(
-            "Tile-level confusion matrix was not found."
-        )
-
-    st.markdown(
-        '<div class="section-title">Training History</div>',
-        unsafe_allow_html=True
-    )
-
-    if tile_history is not None:
-
-        epoch_column = find_column(
-            tile_history,
-            ["epoch"]
-        )
-
-        val_accuracy_column = find_column(
-            tile_history,
-            [
-                "val_accuracy",
-                "validation_accuracy",
-                "val_acc"
-            ]
-        )
-
-        train_accuracy_column = find_column(
-            tile_history,
-            [
-                "train_accuracy",
-                "training_accuracy",
-                "train_acc"
-            ]
-        )
-
-        if epoch_column is not None:
-
-            history_display = (
-                tile_history.copy()
-            )
-
-            if val_accuracy_column is not None:
-
-                values = pd.to_numeric(
-                    history_display[
-                        val_accuracy_column
-                    ],
-                    errors="coerce"
-                )
-
-                if values.max() <= 1.5:
-                    values = values * 100
-
-                history_display[
-                    "Validation Accuracy (%)"
-                ] = values
-
-            if train_accuracy_column is not None:
-
-                values = pd.to_numeric(
-                    history_display[
-                        train_accuracy_column
-                    ],
-                    errors="coerce"
-                )
-
-                if values.max() <= 1.5:
-                    values = values * 100
-
-                history_display[
-                    "Training Accuracy (%)"
-                ] = values
-
-            chart_columns = []
-
-            if "Training Accuracy (%)" in history_display.columns:
-                chart_columns.append(
-                    "Training Accuracy (%)"
-                )
-
-            if "Validation Accuracy (%)" in history_display.columns:
-                chart_columns.append(
-                    "Validation Accuracy (%)"
-                )
-
-            if chart_columns:
-
-                chart_history = (
-                    history_display[
-                        [epoch_column]
-                        + chart_columns
-                    ]
-                    .set_index(
-                        epoch_column
-                    )
-                )
-
-                st.line_chart(
-                    chart_history
-                )
-
-                if "Validation Accuracy (%)" in history_display.columns:
-
-                    best_idx = (
-                        history_display[
-                            "Validation Accuracy (%)"
-                        ]
-                        .idxmax()
-                    )
-
-                    best_epoch = (
-                        history_display.loc[
-                            best_idx,
-                            epoch_column
-                        ]
-                    )
-
-                    best_value = (
-                        history_display.loc[
-                            best_idx,
-                            "Validation Accuracy (%)"
-                        ]
-                    )
-
-                    st.info(
-                        f"Best validation accuracy: "
-                        f"{best_value:.2f}% "
-                        f"at epoch {best_epoch}."
-                    )
-
-        with st.expander(
-            "View training history"
-        ):
-
-            st.dataframe(
-                tile_history,
-                width="stretch",
-                hide_index=True
-            )
-
-    else:
-
-        st.info(
-            "Training history is not available."
-        )
-
-    st.markdown(
-        '<div class="section-title">Evaluation Note</div>',
-        unsafe_allow_html=True
-    )
 
     st.markdown(
         """
-        <div class="warning-note">
+        <div class="warning-box">
 
-        The tile-level model achieves strong overall validation
-        accuracy, but performance is not equal across all classes.
-        Disease Class 2 currently has very low or zero recall,
-        so further model improvement is required.
+        <b>Important:</b>
+        The overall accuracy is 90.78%, but the model currently
+        has very weak performance on Disease Class 2.
+        The 0% recall means the current model should not be
+        interpreted as a reliable detector for that class.
 
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
+
+    st.markdown(
+        '<div class="section-title">Training History</div>',
+        unsafe_allow_html=True,
+    )
+
+    if not history_df.empty:
+
+        numeric_columns = history_df.select_dtypes(
+            include=np.number
+        ).columns.tolist()
+
+        if numeric_columns:
+
+            st.line_chart(
+                history_df[
+                    numeric_columns
+                ]
+            )
 
 
 # ============================================================
-# PREDICTION
+# STEP 14 — PREDICTION VISUALIZATION
 # ============================================================
 
 elif page == "Prediction":
 
-    st.markdown(
-        '<div class="main-title">AI Prediction</div>',
-        unsafe_allow_html=True
+    st.subheader(
+        "🔬 AI Hyperspectral Prediction"
     )
 
     st.markdown(
         """
-        <div class="subtitle">
-            Upload a hyperspectral image and classify it using
-            the tile-level 3D-CNN model.
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
+        Upload an HSI tile to run the trained
+        tile-level 3D-CNN model and visualize
+        its prediction.
         """
-        <div class="info-card">
-
-        <span class="model-badge">
-        ACTIVE MODEL
-        </span>
-
-        <h3>Tile-Level 3D-CNN</h3>
-
-        <p style="color:#6b7280;">
-        The prediction page uses the same tile-level model
-        evaluated in the Model Performance section.
-        </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.caption(
-        "Model file: outputs/models/"
-        "terraspectra_3dcnn_tilesplit_best.pt"
     )
 
     uploaded_file = st.file_uploader(
-        "Upload hyperspectral .npz file",
+        "Upload hyperspectral NPZ tile",
         type=["npz"],
-        key="prediction_npz"
+        key="prediction_upload",
     )
 
-    if uploaded_file is not None:
+    if uploaded_file is None:
+
+        st.markdown(
+            """
+            <div class="info-box">
+
+            <b>Supported input:</b> `.npz` hyperspectral tile<br>
+            <b>Expected array:</b> `im`<br>
+            <b>Expected shape:</b> H × W × 20 spectral bands
+
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    else:
 
         try:
 
-            npz_data = np.load(
+            data = np.load(
                 uploaded_file
             )
 
-            if "im" not in npz_data:
+            if "im" not in data:
 
                 st.error(
-                    "The uploaded NPZ file does not contain "
-                    "the expected 'im' array."
+                    "The uploaded NPZ file does not contain an 'im' array."
                 )
 
             else:
 
-                hsi = npz_data["im"]
+                hsi = data["im"]
 
                 if hsi.ndim != 3:
 
                     st.error(
-                        f"Invalid HSI shape: {hsi.shape}. "
-                        "Expected (Height, Width, Bands)."
+                        "Invalid HSI shape. "
+                        "Expected H × W × Bands."
                     )
 
                 elif hsi.shape[2] != EXPECTED_BANDS:
 
                     st.error(
-                        f"This model expects {EXPECTED_BANDS} "
-                        f"spectral bands, but the uploaded "
-                        f"file contains {hsi.shape[2]}."
+                        f"This model expects "
+                        f"{EXPECTED_BANDS} bands, "
+                        f"but the uploaded file contains "
+                        f"{hsi.shape[2]} bands."
                     )
 
                 else:
 
+                    height, width, bands = hsi.shape
+
                     st.success(
-                        f"Hyperspectral image loaded: "
-                        f"{hsi.shape[0]} × "
-                        f"{hsi.shape[1]} × "
-                        f"{hsi.shape[2]}"
+                        f"HSI tile loaded successfully: "
+                        f"{height} × {width} × {bands}"
                     )
 
+                    # ------------------------------------------------
+                    # VISUALIZATION CONTROLS
+                    # ------------------------------------------------
+
                     st.markdown(
-                        '<div class="section-title">Spectral Preview</div>',
-                        unsafe_allow_html=True
+                        '<div class="section-title">Input Visualization</div>',
+                        unsafe_allow_html=True,
                     )
 
                     selected_band = st.slider(
-                        "Select band for visualization",
+                        "Select spectral band for visualization",
                         min_value=0,
                         max_value=EXPECTED_BANDS - 1,
                         value=0,
-                        key="prediction_band"
                     )
 
-                    display_band = (
-                        normalize_band_for_display(
-                            hsi[
-                                :,
-                                :,
-                                selected_band
-                            ]
-                        )
+                    selected_wavelength = (
+                        WAVELENGTHS[selected_band]
                     )
 
-                    wavelength = WAVELENGTHS[
+                    original_band = hsi[
+                        :,
+                        :,
                         selected_band
                     ]
 
-                    st.image(
-                        display_band,
-                        caption=(
-                            f"Band {selected_band + 1} "
-                            f"• {wavelength} nm"
-                        ),
-                        width="stretch"
+                    display_band = (
+                        normalize_band_for_display(
+                            original_band
+                        )
                     )
 
-                    info1, info2, info3 = st.columns(3)
+                    # ------------------------------------------------
+                    # PREPARE MODEL INPUT
+                    # ------------------------------------------------
 
-                    with info1:
+                    model_tensor = prepare_hyperspectral_tensor(
+                        hsi
+                    )
 
-                        st.metric(
-                            "Height",
-                            hsi.shape[0]
+                    # Extract model-view band.
+                    model_band = (
+                        model_tensor[
+                            0,
+                            0,
+                            selected_band
+                        ]
+                        .detach()
+                        .cpu()
+                        .numpy()
+                    )
+
+                    model_band_display = (
+                        normalize_band_for_display(
+                            model_band
+                        )
+                    )
+
+                    image_col1, image_col2 = st.columns(
+                        2
+                    )
+
+                    with image_col1:
+
+                        st.markdown(
+                            "#### Original Spectral Band"
                         )
 
-                    with info2:
-
-                        st.metric(
-                            "Width",
-                            hsi.shape[1]
+                        st.image(
+                            display_band,
+                            caption=(
+                                f"Band {selected_band + 1} "
+                                f"• {selected_wavelength} nm "
+                                f"• Original {height}×{width}"
+                            ),
+                            use_container_width=True,
                         )
 
-                    with info3:
+                    with image_col2:
 
-                        st.metric(
-                            "Bands",
-                            hsi.shape[2]
+                        st.markdown(
+                            "#### Model Input Preview"
                         )
+
+                        st.image(
+                            model_band_display,
+                            caption=(
+                                f"Band {selected_band + 1} "
+                                f"• {selected_wavelength} nm "
+                                f"• Resized 32×32"
+                            ),
+                            use_container_width=True,
+                        )
+
+                    # ------------------------------------------------
+                    # RUN PREDICTION
+                    # ------------------------------------------------
 
                     st.markdown(
-                        '<div class="section-title">AI Classification</div>',
-                        unsafe_allow_html=True
+                        '<div class="section-title">AI Prediction</div>',
+                        unsafe_allow_html=True,
                     )
 
-                    if not TORCH_AVAILABLE:
+                    if st.button(
+                        "🔍 Run Tile-Level AI Prediction",
+                        type="primary",
+                        use_container_width=True,
+                    ):
 
-                        st.error(
-                            "PyTorch is not available."
+                        try:
+
+                            (
+                                predicted_class,
+                                confidence,
+                                probabilities,
+                                tensor,
+                            ) = run_prediction(
+                                hsi
+                            )
+
+                            st.session_state[
+                                "prediction_result"
+                            ] = {
+                                "predicted_class":
+                                    predicted_class,
+
+                                "confidence":
+                                    confidence,
+
+                                "probabilities":
+                                    probabilities,
+
+                                "hsi":
+                                    hsi,
+
+                                "selected_band":
+                                    selected_band,
+                            }
+
+                        except Exception as exc:
+
+                            st.error(
+                                f"Prediction failed: {exc}"
+                            )
+
+                    # ------------------------------------------------
+                    # DISPLAY STORED RESULT
+                    # ------------------------------------------------
+
+                    result = st.session_state.get(
+                        "prediction_result"
+                    )
+
+                    if result is not None:
+
+                        predicted_class = int(
+                            result[
+                                "predicted_class"
+                            ]
                         )
 
-                    elif TerraSpectra3DCNN is None:
-
-                        st.error(
-                            "TerraSpectra3DCNN could not be imported."
+                        confidence = float(
+                            result[
+                                "confidence"
+                            ]
                         )
 
-                    elif not TILESPLIT_MODEL_PATH.exists():
-
-                        st.error(
-                            "Tile-level model was not found:\n"
-                            f"{TILESPLIT_MODEL_PATH}"
+                        probabilities = np.asarray(
+                            result[
+                                "probabilities"
+                            ]
                         )
 
-                    else:
+                        predicted_name = CLASS_NAMES.get(
+                            predicted_class,
+                            f"Class {predicted_class}"
+                        )
 
-                        if st.button(
-                            "🔍 Run Tile-Level AI Prediction",
-                            type="primary",
-                            width="stretch"
-                        ):
+                        # --------------------------------------------
+                        # RESULT CARD
+                        # --------------------------------------------
 
-                            try:
+                        st.markdown(
+                            '<div class="section-title">Prediction Result</div>',
+                            unsafe_allow_html=True,
+                        )
 
-                                with st.spinner(
-                                    "Preparing hyperspectral tensor..."
-                                ):
+                        result_col1, result_col2, result_col3 = st.columns(
+                            3
+                        )
 
-                                    tensor = (
-                                        prepare_hyperspectral_tensor(
-                                            hsi
-                                        )
-                                    )
+                        with result_col1:
 
-                                with st.spinner(
-                                    "Loading tile-level 3D-CNN..."
-                                ):
+                            st.markdown(
+                                f"""
+                                <div class="prediction-card">
 
-                                    model = (
-                                        load_prediction_model()
-                                    )
-
-                                with st.spinner(
-                                    "Running AI prediction..."
-                                ):
-
-                                    (
-                                        predicted_class,
-                                        probabilities
-                                    ) = get_model_prediction(
-                                        model,
-                                        tensor
-                                    )
-
-                                predicted_name = (
-                                    CLASS_NAMES[
-                                        predicted_class
-                                    ]
-                                )
-
-                                confidence = (
-                                    probabilities[
-                                        predicted_class
-                                    ] * 100
-                                )
-
-                                st.success(
-                                    "Prediction completed successfully."
-                                )
-
-                                result_col1, result_col2 = (
-                                    st.columns(2)
-                                )
-
-                                with result_col1:
-
-                                    st.markdown(
-                                        f"""
-                                        <div class="status-card">
-
-                                        <div class="small-label">
+                                    <div class="prediction-title">
                                         Predicted Class
-                                        </div>
+                                    </div>
 
-                                        <div class="big-value">
+                                    <div class="prediction-class">
                                         {predicted_name}
-                                        </div>
+                                    </div>
 
-                                        </div>
-                                        """,
-                                        unsafe_allow_html=True
-                                    )
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
 
-                                with result_col2:
+                        with result_col2:
 
-                                    st.markdown(
-                                        f"""
-                                        <div class="status-card">
+                            st.markdown(
+                                f"""
+                                <div class="prediction-card">
 
-                                        <div class="small-label">
+                                    <div class="prediction-title">
                                         Model Confidence
-                                        </div>
+                                    </div>
 
-                                        <div class="big-value">
-                                        {confidence:.2f}%
-                                        </div>
+                                    <div class="confidence">
+                                        {confidence * 100:.2f}%
+                                    </div>
 
-                                        </div>
-                                        """,
-                                        unsafe_allow_html=True
-                                    )
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
 
-                                st.markdown(
-                                    "#### Class Probabilities"
-                                )
+                        with result_col3:
 
-                                probability_df = pd.DataFrame(
-                                    {
-                                        "Class": [
-                                            CLASS_NAMES[i]
-                                            for i in range(
-                                                len(
-                                                    probabilities
-                                                )
-                                            )
-                                        ],
+                            st.markdown(
+                                f"""
+                                <div class="prediction-card">
 
-                                        "Probability (%)": (
-                                            probabilities * 100
-                                        )
-                                    }
-                                )
+                                    <div class="prediction-title">
+                                        Spectral Bands Used
+                                    </div>
 
-                                st.bar_chart(
-                                    probability_df.set_index(
-                                        "Class"
-                                    )
-                                )
+                                    <div class="prediction-class">
+                                        {bands}
+                                    </div>
 
-                                probability_display = (
-                                    probability_df.copy()
-                                )
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
 
-                                probability_display[
-                                    "Probability (%)"
-                                ] = probability_display[
-                                    "Probability (%)"
-                                ].round(2)
+                        # --------------------------------------------
+                        # PROBABILITY VISUALIZATION
+                        # --------------------------------------------
 
-                                st.dataframe(
-                                    probability_display,
-                                    width="stretch",
-                                    hide_index=True
-                                )
+                        st.markdown(
+                            '<div class="section-title">Class Probability Distribution</div>',
+                            unsafe_allow_html=True,
+                        )
 
-                            except Exception as exc:
+                        probability_df = pd.DataFrame(
+                            {
+                                "Class": [
+                                    CLASS_NAMES[0],
+                                    CLASS_NAMES[1],
+                                    CLASS_NAMES[2],
+                                ],
+                                "Probability": (
+                                    probabilities * 100
+                                ),
+                            }
+                        )
 
-                                st.error(
-                                    "Prediction failed."
-                                )
+                        st.bar_chart(
+                            probability_df.set_index(
+                                "Class"
+                            ),
+                            y="Probability",
+                        )
 
-                                st.exception(
-                                    exc
-                                )
+                        probability_display = (
+                            probability_df.copy()
+                        )
+
+                        probability_display[
+                            "Probability"
+                        ] = probability_display[
+                            "Probability"
+                        ].map(
+                            lambda x: f"{x:.2f}%"
+                        )
+
+                        st.dataframe(
+                            probability_display,
+                            hide_index=True,
+                            use_container_width=True,
+                        )
+
+                        # --------------------------------------------
+                        # SPECTRAL SIGNATURE
+                        # --------------------------------------------
+
+                        st.markdown(
+                            '<div class="section-title">Mean Spectral Signature</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                        spectral_profile = hsi.mean(
+                            axis=(0, 1)
+                        )
+
+                        spectral_df = pd.DataFrame(
+                            {
+                                "Wavelength (nm)": WAVELENGTHS,
+                                "Mean Intensity": (
+                                    spectral_profile
+                                ),
+                            }
+                        )
+
+                        st.line_chart(
+                            spectral_df.set_index(
+                                "Wavelength (nm)"
+                            )
+                        )
+
+                        # --------------------------------------------
+                        # INTERPRETATION
+                        # --------------------------------------------
+
+                        st.markdown(
+                            '<div class="section-title">Prediction Interpretation</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                        if predicted_class == 0:
+
+                            st.markdown(
+                                """
+                                <div class="success-box">
+
+                                The tile was classified as
+                                <b>Healthy / Normal</b> by the current
+                                3D-CNN model.
+
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+                        elif predicted_class == 1:
+
+                            st.markdown(
+                                """
+                                <div class="warning-box">
+
+                                The tile was classified as
+                                <b>Disease Class 1</b>.
+                                This is an AI model prediction and
+                                should be treated as an automated
+                                screening result.
+
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+                        else:
+
+                            st.markdown(
+                                """
+                                <div class="warning-box">
+
+                                The tile was classified as
+                                <b>Disease Class 2</b>.
+
+                                <br><br>
+
+                                The current validation results show
+                                very weak recall for this class,
+                                so this prediction requires additional
+                                validation.
+
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+                        # --------------------------------------------
+                        # MODEL DETAILS
+                        # --------------------------------------------
+
+                        st.markdown(
+                            '<div class="section-title">Inference Details</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                        detail_col1, detail_col2 = st.columns(
+                            2
+                        )
+
+                        with detail_col1:
+
+                            st.markdown(
+                                """
+                                <div class="info-box">
+
+                                <b>Architecture:</b> 3D-CNN<br>
+                                <b>Input:</b> 20 spectral bands<br>
+                                <b>Model input:</b> 20 × 32 × 32<br>
+                                <b>Output classes:</b> 3<br>
+                                <b>Parameters:</b> 18,243
+
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+                        with detail_col2:
+
+                            st.markdown(
+                                """
+                                <div class="info-box">
+
+                                <b>Model:</b> Tile-level split model<br>
+                                <b>Checkpoint:</b>
+                                terraspectra_3dcnn_tilesplit_best.pt<br>
+                                <b>Inference:</b> CPU compatible<br>
+                                <b>Visualization:</b>
+                                Spectral + probability analysis
+
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+                        st.caption(
+                            "Note: This visualization represents a tile-level classification. "
+                            "It does not indicate pixel-level disease segmentation."
+                        )
 
         except Exception as exc:
 
@@ -2062,121 +1573,44 @@ elif page == "Prediction":
 
 elif page == "Monitoring":
 
-    st.markdown(
-        '<div class="main-title">Monitoring</div>',
-        unsafe_allow_html=True
+    st.subheader(
+        "Agricultural Monitoring"
+    )
+
+    st.info(
+        "Monitoring visualization is currently a prototype. "
+        "GIS-linked geospatial inference will be added in the next phase."
+    )
+
+    np.random.seed(42)
+
+    monitoring_grid = pd.DataFrame(
+        np.random.rand(
+            12,
+            12
+        )
+    )
+
+    st.subheader(
+        "Field Risk Visualization"
+    )
+
+    st.dataframe(
+        monitoring_grid.style.format(
+            "{:.2f}"
+        ),
+        use_container_width=True,
     )
 
     st.markdown(
         """
-        <div class="subtitle">
-            Spatial-style visualization for hyperspectral
-            disease monitoring.
+        <div class="info-box">
+
+        Future versions will connect model predictions
+        with geospatial coordinates to provide field-level
+        disease monitoring and risk mapping.
+
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
-
-    st.info(
-        "The current monitoring view is a visualization prototype. "
-        "Real GIS integration can be added with GPS-linked field data."
-    )
-
-    rng = np.random.default_rng(
-        42
-    )
-
-    monitoring_grid = rng.integers(
-        0,
-        3,
-        size=(12, 12)
-    )
-
-    monitoring_counts = np.bincount(
-        monitoring_grid.flatten(),
-        minlength=3
-    )
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-
-        st.metric(
-            "Healthy Regions",
-            int(monitoring_counts[0])
-        )
-
-    with col2:
-
-        st.metric(
-            "Disease Class 1",
-            int(monitoring_counts[1])
-        )
-
-    with col3:
-
-        st.metric(
-            "Disease Class 2",
-            int(monitoring_counts[2])
-        )
-
-    st.markdown(
-        '<div class="section-title">Disease Monitoring Grid</div>',
-        unsafe_allow_html=True
-    )
-
-    monitoring_df = pd.DataFrame(
-        monitoring_grid
-    )
-
-    monitoring_df = monitoring_df.replace(
-        {
-            0: "Healthy",
-            1: "Disease 1",
-            2: "Disease 2"
-        }
-    )
-
-    st.dataframe(
-        monitoring_df,
-        width="stretch"
-    )
-
-    st.markdown(
-        '<div class="section-title">Class Distribution</div>',
-        unsafe_allow_html=True
-    )
-
-    monitoring_chart = pd.DataFrame(
-        {
-            "Class": [
-                "Healthy / Normal",
-                "Disease Class 1",
-                "Disease Class 2"
-            ],
-
-            "Regions": monitoring_counts
-        }
-    )
-
-    st.bar_chart(
-        monitoring_chart.set_index(
-            "Class"
-        )
-    )
-
-
-# ============================================================
-# FOOTER
-# ============================================================
-
-st.markdown(
-    """
-    <div class="footer">
-        TerraSpectra • Hyperspectral AI Monitoring System
-        <br>
-        Tile-Level 3D-CNN • 20 Spectral Bands • 3-Class Classification
-    </div>
-    """,
-    unsafe_allow_html=True
-)
