@@ -6,6 +6,11 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+
+# ============================================================
+# PYTORCH
+# ============================================================
+
 try:
     import torch
     import torch.nn.functional as F
@@ -15,7 +20,7 @@ except ImportError:
 
 
 # ============================================================
-# PATHS
+# PROJECT PATHS
 # ============================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +32,9 @@ if str(SRC_DIR) not in sys.path:
 from model_3dcnn import TerraSpectra3DCNN
 
 
-PATCH_CSV_PATH = PROJECT_ROOT / "outputs" / "hyperspectral_patches.csv"
+PATCH_CSV_PATH = (
+    PROJECT_ROOT / "outputs" / "hyperspectral_patches.csv"
+)
 
 TILESPLIT_MODEL_PATH = (
     PROJECT_ROOT
@@ -94,129 +101,17 @@ st.markdown(
     """
     <style>
 
-    .main {
-        background-color: #f7f9fc;
-    }
-
     .block-container {
         padding-top: 1.5rem;
         padding-bottom: 2rem;
         max-width: 1450px;
     }
 
-    .hero {
-        padding: 1.5rem 1.8rem;
-        border-radius: 18px;
-        background: linear-gradient(
-            135deg,
-            #0f172a 0%,
-            #1e293b 55%,
-            #334155 100%
-        );
-        color: white;
-        margin-bottom: 1.5rem;
-    }
-
-    .hero h1 {
-        margin: 0;
-        font-size: 2.1rem;
-    }
-
-    .hero p {
-        margin-top: 0.5rem;
-        color: #cbd5e1;
-        font-size: 1rem;
-    }
-
-    .metric-card {
-        padding: 1.2rem;
-        border-radius: 16px;
-        background: white;
+    [data-testid="stMetric"] {
+        background-color: #ffffff;
         border: 1px solid #e2e8f0;
-        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
-        min-height: 125px;
-    }
-
-    .metric-label {
-        color: #64748b;
-        font-size: 0.85rem;
-        font-weight: 600;
-    }
-
-    .metric-value {
-        color: #0f172a;
-        font-size: 1.65rem;
-        font-weight: 750;
-        margin-top: 0.3rem;
-    }
-
-    .metric-sub {
-        color: #64748b;
-        font-size: 0.78rem;
-        margin-top: 0.2rem;
-    }
-
-    .prediction-card {
-        padding: 1.5rem;
-        border-radius: 18px;
-        background: white;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 3px 12px rgba(15, 23, 42, 0.07);
-        text-align: center;
-        min-height: 210px;
-    }
-
-    .prediction-title {
-        color: #64748b;
-        font-size: 0.9rem;
-        font-weight: 650;
-    }
-
-    .prediction-class {
-        color: #0f172a;
-        font-size: 1.8rem;
-        font-weight: 800;
-        margin-top: 0.7rem;
-    }
-
-    .confidence {
-        color: #2563eb;
-        font-size: 1.35rem;
-        font-weight: 750;
-        margin-top: 0.5rem;
-    }
-
-    .section-title {
-        font-size: 1.3rem;
-        font-weight: 750;
-        color: #0f172a;
-        margin-top: 1.2rem;
-        margin-bottom: 0.7rem;
-    }
-
-    .info-box {
-        padding: 1rem 1.2rem;
-        border-radius: 14px;
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        color: #475569;
-        line-height: 1.55;
-    }
-
-    .warning-box {
-        padding: 1rem 1.2rem;
-        border-radius: 14px;
-        background: #fff7ed;
-        border: 1px solid #fed7aa;
-        color: #9a3412;
-    }
-
-    .success-box {
-        padding: 1rem 1.2rem;
-        border-radius: 14px;
-        background: #f0fdf4;
-        border: 1px solid #bbf7d0;
-        color: #166534;
+        border-radius: 12px;
+        padding: 12px;
     }
 
     </style>
@@ -226,22 +121,22 @@ st.markdown(
 
 
 # ============================================================
-# HELPERS
+# HELPER FUNCTIONS
 # ============================================================
 
 def find_column(df, candidates):
-    """Find the first matching column from candidate names."""
-
     for candidate in candidates:
+
         if candidate in df.columns:
             return candidate
 
     lower_map = {
-        str(col).lower(): col
-        for col in df.columns
+        str(column).lower(): column
+        for column in df.columns
     }
 
     for candidate in candidates:
+
         if candidate.lower() in lower_map:
             return lower_map[candidate.lower()]
 
@@ -250,8 +145,8 @@ def find_column(df, candidates):
 
 def normalize_band_for_display(band):
     """
-    Convert raw hyperspectral values into a safe
-    0-1 image for Streamlit display.
+    Convert raw hyperspectral values to 0-1
+    for safe Streamlit image display.
     """
 
     band = np.asarray(
@@ -264,16 +159,19 @@ def normalize_band_for_display(band):
             "Spectral band contains NaN or infinite values."
         )
 
-    min_val = float(band.min())
-    max_val = float(band.max())
+    min_value = float(band.min())
+    max_value = float(band.max())
 
-    if max_val > min_val:
+    if max_value > min_value:
+
         band = (
-            band - min_val
+            band - min_value
         ) / (
-            max_val - min_val
+            max_value - min_value
         )
+
     else:
+
         band = np.zeros_like(band)
 
     return np.clip(
@@ -283,17 +181,23 @@ def normalize_band_for_display(band):
     )
 
 
+@st.cache_data
 def load_patch_data():
+
     if not PATCH_CSV_PATH.exists():
         return pd.DataFrame()
 
     try:
-        return pd.read_csv(PATCH_CSV_PATH)
+        return pd.read_csv(
+            PATCH_CSV_PATH
+        )
     except Exception:
         return pd.DataFrame()
 
 
+@st.cache_data
 def load_predictions():
+
     if not TILESPLIT_PREDICTIONS_PATH.exists():
         return pd.DataFrame()
 
@@ -305,7 +209,9 @@ def load_predictions():
         return pd.DataFrame()
 
 
+@st.cache_data
 def load_report():
+
     if not TILESPLIT_REPORT_PATH.exists():
         return pd.DataFrame()
 
@@ -318,7 +224,9 @@ def load_report():
         return pd.DataFrame()
 
 
+@st.cache_data
 def load_history():
+
     if not TILESPLIT_HISTORY_PATH.exists():
         return pd.DataFrame()
 
@@ -330,7 +238,9 @@ def load_history():
         return pd.DataFrame()
 
 
+@st.cache_data
 def load_confusion_matrix():
+
     if not TILESPLIT_CONFUSION_PATH.exists():
         return pd.DataFrame()
 
@@ -343,36 +253,11 @@ def load_confusion_matrix():
         return pd.DataFrame()
 
 
-def get_report_value(report, row, column):
-    if report.empty:
-        return None
-
-    try:
-        value = report.loc[row, column]
-        return float(value)
-    except Exception:
-        return None
-
-
-def percentage_value(value):
-    if value is None:
-        return "N/A"
-
-    return f"{value * 100:.2f}%"
-
-
 def prepare_hyperspectral_tensor(hsi):
-    """
-    Convert HSI from:
-        H x W x Bands
-
-    into model input:
-        1 x 1 x Bands x 32 x 32
-    """
 
     if torch is None or F is None:
         raise RuntimeError(
-            "PyTorch is not installed in the current environment."
+            "PyTorch is not installed."
         )
 
     hsi = np.asarray(
@@ -382,23 +267,23 @@ def prepare_hyperspectral_tensor(hsi):
 
     if hsi.ndim != 3:
         raise ValueError(
-            "Expected hyperspectral image with 3 dimensions."
+            "Expected H × W × Bands hyperspectral data."
         )
 
     height, width, bands = hsi.shape
 
     if bands != EXPECTED_BANDS:
         raise ValueError(
-            f"Expected {EXPECTED_BANDS} spectral bands, "
+            f"Expected {EXPECTED_BANDS} bands, "
             f"but received {bands}."
         )
 
     if not np.isfinite(hsi).all():
         raise ValueError(
-            "Hyperspectral image contains NaN or infinite values."
+            "Hyperspectral data contains NaN or infinite values."
         )
 
-    # Normalize uint16-style hyperspectral values.
+    # Normalize raw uint16 HSI.
     hsi = hsi / 65535.0
 
     hsi = np.clip(
@@ -432,17 +317,13 @@ def prepare_hyperspectral_tensor(hsi):
             PATCH_SIZE
         ),
         mode="trilinear",
-        align_corners=False,
+        align_corners=False
     )
 
     return tensor
 
 
 def create_terraspectra_model():
-    """
-    Create TerraSpectra3DCNN while remaining compatible
-    with the current constructor implementation.
-    """
 
     signature = inspect.signature(
         TerraSpectra3DCNN
@@ -465,11 +346,13 @@ def create_terraspectra_model():
         kwargs["channels"] = 1
 
     try:
+
         return TerraSpectra3DCNN(
             **kwargs
         )
 
     except TypeError:
+
         return TerraSpectra3DCNN()
 
 
@@ -483,40 +366,47 @@ def load_prediction_model():
 
     if not TILESPLIT_MODEL_PATH.exists():
         raise FileNotFoundError(
-            f"Model file not found:\n"
+            "Model file not found:\n"
             f"{TILESPLIT_MODEL_PATH}"
         )
 
     model = create_terraspectra_model()
 
     try:
+
         checkpoint = torch.load(
             TILESPLIT_MODEL_PATH,
             map_location="cpu",
-            weights_only=False,
+            weights_only=False
         )
+
     except TypeError:
+
         checkpoint = torch.load(
             TILESPLIT_MODEL_PATH,
-            map_location="cpu",
+            map_location="cpu"
         )
 
     if isinstance(checkpoint, dict):
 
         if "model_state_dict" in checkpoint:
+
             state_dict = checkpoint[
                 "model_state_dict"
             ]
 
         elif "state_dict" in checkpoint:
+
             state_dict = checkpoint[
                 "state_dict"
             ]
 
         else:
+
             state_dict = checkpoint
 
     else:
+
         state_dict = checkpoint
 
     cleaned_state_dict = {}
@@ -585,52 +475,8 @@ def run_prediction(hsi):
         predicted_class,
         confidence,
         probability_values,
-        tensor,
+        tensor
     )
-
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-st.sidebar.markdown(
-    """
-    <div style="
-        font-size: 1.45rem;
-        font-weight: 800;
-        margin-bottom: 0.2rem;
-    ">
-        🌱 TerraSpectra
-    </div>
-
-    <div style="
-        color: #64748b;
-        font-size: 0.85rem;
-        margin-bottom: 1rem;
-    ">
-        Hyperspectral AI Monitoring
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-page = st.sidebar.radio(
-    "Navigation",
-    [
-        "Overview",
-        "Data Explorer",
-        "Spectral Analysis",
-        "Model Performance",
-        "Prediction",
-        "Monitoring",
-    ],
-)
-
-st.sidebar.markdown("---")
-
-st.sidebar.caption(
-    "3D-CNN • Hyperspectral Imaging • Potato Disease Analysis"
-)
 
 
 # ============================================================
@@ -645,36 +491,66 @@ confusion_df = load_confusion_matrix()
 
 
 # ============================================================
-# HERO
+# SIDEBAR
 # ============================================================
 
-st.markdown(
-    """
-    <div class="hero">
+st.sidebar.title(
+    "🌱 TerraSpectra AI"
+)
 
-        <h1>🌱 TerraSpectra AI</h1>
+st.sidebar.caption(
+    "Hyperspectral Potato Disease Monitoring"
+)
 
-        <p>
-            Hyperspectral potato disease monitoring
-            powered by a tile-level 3D Convolutional Neural Network.
-        </p>
+st.sidebar.divider()
 
-    </div>
-    """,
-    unsafe_allow_html=True,
+page = st.sidebar.radio(
+    "Navigation",
+    [
+        "Overview",
+        "Data Explorer",
+        "Spectral Analysis",
+        "Model Performance",
+        "Prediction",
+        "Monitoring"
+    ]
+)
+
+st.sidebar.divider()
+
+st.sidebar.caption(
+    "3D-CNN • Hyperspectral Imaging • AI"
 )
 
 
 # ============================================================
-# OVERVIEW
+# MAIN TITLE
+# ============================================================
+
+st.title(
+    "🌱 TerraSpectra AI"
+)
+
+st.caption(
+    "Hyperspectral potato disease monitoring "
+    "using a tile-level 3D Convolutional Neural Network."
+)
+
+
+# ============================================================
+# PAGE 1 — OVERVIEW
 # ============================================================
 
 if page == "Overview":
 
-    st.subheader("System Overview")
+    st.header(
+        "System Overview"
+    )
 
     total_tiles = 1115
+
     total_bands = EXPECTED_BANDS
+
     total_patches = (
         len(patch_df)
         if not patch_df.empty
@@ -685,89 +561,106 @@ if page == "Overview":
 
     accuracy = 0.9078
 
-    cols = st.columns(4)
+    col1, col2, col3, col4 = st.columns(4)
 
-    metrics = [
-        (
+    with col1:
+
+        st.metric(
             "HSI Tiles",
             f"{total_tiles:,}",
-            "Hyperspectral image tiles",
-        ),
-        (
-            "Spectral Bands",
-            str(total_bands),
-            "Bands per HSI tile",
-        ),
-        (
-            "Extracted Patches",
-            f"{total_patches:,}",
-            "Training-ready patches",
-        ),
-        (
-            "Validation Accuracy",
-            f"{accuracy * 100:.2f}%",
-            "Tile-level 3D-CNN",
-        ),
-    ]
-
-    for col, metric in zip(
-        cols,
-        metrics
-    ):
-
-        label, value, sub = metric
-
-        col.markdown(
-            f"""
-            <div class="metric-card">
-
-                <div class="metric-label">
-                    {label}
-                </div>
-
-                <div class="metric-value">
-                    {value}
-                </div>
-
-                <div class="metric-sub">
-                    {sub}
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
+            "Hyperspectral image tiles"
         )
 
-    st.markdown(
-        '<div class="section-title">Current AI Model</div>',
-        unsafe_allow_html=True,
+    with col2:
+
+        st.metric(
+            "Spectral Bands",
+            total_bands,
+            "Bands per HSI tile"
+        )
+
+    with col3:
+
+        st.metric(
+            "Extracted Patches",
+            f"{total_patches:,}",
+            "Training-ready patches"
+        )
+
+    with col4:
+
+        st.metric(
+            "Validation Accuracy",
+            f"{accuracy * 100:.2f}%",
+            "Tile-level 3D-CNN"
+        )
+
+    st.divider()
+
+    st.subheader(
+        "Current AI Model"
     )
 
-    st.markdown(
-        """
-        <div class="info-box">
+    col1, col2 = st.columns(2)
 
-        <b>Model:</b> Tile-Level 3D-CNN<br>
-        <b>Input:</b> 20-band hyperspectral tile<br>
-        <b>Input resolution:</b> 32 × 32<br>
-        <b>Output classes:</b> 3<br>
-        <b>Validation samples:</b> 1,725<br>
-        <b>Best validation accuracy:</b> 90.78%<br>
-        <b>Parameters:</b> 18,243
+    with col1:
 
-        </div>
-        """,
-        unsafe_allow_html=True,
+        st.write(
+            "**Architecture:** Tile-Level 3D-CNN"
+        )
+
+        st.write(
+            "**Input:** 20-band hyperspectral tile"
+        )
+
+        st.write(
+            "**Model Input:** 20 × 32 × 32"
+        )
+
+        st.write(
+            "**Output Classes:** 3"
+        )
+
+    with col2:
+
+        st.write(
+            "**Validation Samples:** 1,725"
+        )
+
+        st.write(
+            "**Best Validation Accuracy:** 90.78%"
+        )
+
+        st.write(
+            "**Parameters:** 18,243"
+        )
+
+        st.write(
+            "**Checkpoint:** "
+            "terraspectra_3dcnn_tilesplit_best.pt"
+        )
+
+    st.divider()
+
+    st.subheader(
+        "Project Status"
+    )
+
+    st.success(
+        "Tile-level training, evaluation, dashboard "
+        "integration, and prediction visualization are implemented."
     )
 
 
 # ============================================================
-# DATA EXPLORER
+# PAGE 2 — DATA EXPLORER
 # ============================================================
 
 elif page == "Data Explorer":
 
-    st.subheader("Hyperspectral Dataset Explorer")
+    st.header(
+        "Hyperspectral Dataset Explorer"
+    )
 
     if patch_df.empty:
 
@@ -777,14 +670,17 @@ elif page == "Data Explorer":
 
     else:
 
-        st.write(
-            f"Dataset contains "
-            f"**{len(patch_df):,} extracted patches**."
+        st.success(
+            f"Loaded {len(patch_df):,} extracted patches."
+        )
+
+        st.subheader(
+            "Dataset Preview"
         )
 
         st.dataframe(
             patch_df.head(100),
-            use_container_width=True,
+            use_container_width=True
         )
 
         label_column = find_column(
@@ -793,15 +689,14 @@ elif page == "Data Explorer":
                 "label",
                 "class",
                 "target",
-                "disease",
-            ],
+                "disease"
+            ]
         )
 
         if label_column:
 
-            st.markdown(
-                '<div class="section-title">Class Distribution</div>',
-                unsafe_allow_html=True,
+            st.subheader(
+                "Class Distribution"
             )
 
             distribution = (
@@ -818,20 +713,29 @@ elif page == "Data Explorer":
 
 
 # ============================================================
-# SPECTRAL ANALYSIS
+# PAGE 3 — SPECTRAL ANALYSIS
 # ============================================================
 
 elif page == "Spectral Analysis":
 
-    st.subheader("Spectral Analysis")
+    st.header(
+        "Spectral Analysis"
+    )
 
     uploaded_file = st.file_uploader(
         "Upload a hyperspectral .npz file",
         type=["npz"],
-        key="spectral_upload",
+        key="spectral_upload"
     )
 
-    if uploaded_file is not None:
+    if uploaded_file is None:
+
+        st.info(
+            "Upload an NPZ file containing an "
+            "'im' array to inspect spectral bands."
+        )
+
+    else:
 
         try:
 
@@ -842,7 +746,8 @@ elif page == "Spectral Analysis":
             if "im" not in data:
 
                 st.error(
-                    "The uploaded NPZ file does not contain an 'im' array."
+                    "The uploaded NPZ file does not "
+                    "contain an 'im' array."
                 )
 
             else:
@@ -852,7 +757,7 @@ elif page == "Spectral Analysis":
                 if hsi.ndim != 3:
 
                     st.error(
-                        "Expected a 3-dimensional hyperspectral image."
+                        "Expected H × W × Bands hyperspectral data."
                     )
 
                 else:
@@ -868,28 +773,48 @@ elif page == "Spectral Analysis":
                         "Select spectral band",
                         min_value=0,
                         max_value=bands - 1,
-                        value=0,
+                        value=0
                     )
 
-                    display_band = normalize_band_for_display(
-                        hsi[:, :, band_number]
+                    display_band = (
+                        normalize_band_for_display(
+                            hsi[
+                                :,
+                                :,
+                                band_number
+                            ]
+                        )
                     )
 
-                    col1, col2 = st.columns(
-                        2
-                    )
+                    col1, col2 = st.columns(2)
 
                     with col1:
 
+                        if band_number < len(
+                            WAVELENGTHS
+                        ):
+
+                            wavelength = (
+                                WAVELENGTHS[
+                                    band_number
+                                ]
+                            )
+
+                            caption = (
+                                f"Band {band_number + 1} "
+                                f"• {wavelength} nm"
+                            )
+
+                        else:
+
+                            caption = (
+                                f"Band {band_number + 1}"
+                            )
+
                         st.image(
                             display_band,
-                            caption=(
-                                f"Band {band_number + 1} "
-                                f"({WAVELENGTHS[band_number]} nm)"
-                                if band_number < len(WAVELENGTHS)
-                                else f"Band {band_number + 1}"
-                            ),
-                            use_container_width=True,
+                            caption=caption,
+                            use_container_width=True
                         )
 
                     with col2:
@@ -900,10 +825,10 @@ elif page == "Spectral Analysis":
 
                         spectral_df = pd.DataFrame(
                             {
-                                "Wavelength (nm)": WAVELENGTHS[
-                                    :bands
-                                ],
-                                "Mean Intensity": spectral_profile,
+                                "Wavelength (nm)":
+                                    WAVELENGTHS[:bands],
+                                "Mean Intensity":
+                                    spectral_profile
                             }
                         )
 
@@ -911,6 +836,33 @@ elif page == "Spectral Analysis":
                             spectral_df.set_index(
                                 "Wavelength (nm)"
                             )
+                        )
+
+                    st.subheader(
+                        "Spectral Statistics"
+                    )
+
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+
+                        st.metric(
+                            "Minimum",
+                            f"{float(hsi.min()):.2f}"
+                        )
+
+                    with col2:
+
+                        st.metric(
+                            "Maximum",
+                            f"{float(hsi.max()):.2f}"
+                        )
+
+                    with col3:
+
+                        st.metric(
+                            "Mean",
+                            f"{float(hsi.mean()):.2f}"
                         )
 
         except Exception as exc:
@@ -921,115 +873,106 @@ elif page == "Spectral Analysis":
 
 
 # ============================================================
-# MODEL PERFORMANCE
+# PAGE 4 — MODEL PERFORMANCE
 # ============================================================
 
 elif page == "Model Performance":
 
-    st.subheader("Tile-Level 3D-CNN Performance")
+    st.header(
+        "Tile-Level 3D-CNN Performance"
+    )
 
-    cols = st.columns(4)
+    col1, col2, col3, col4 = st.columns(4)
 
-    performance_metrics = [
-        (
+    with col1:
+
+        st.metric(
             "Accuracy",
             "90.78%",
-            "Validation",
-        ),
-        (
-            "Class 0 Recall",
-            "96.48%",
-            "Healthy / Normal",
-        ),
-        (
-            "Class 1 Recall",
-            "44.29%",
-            "Disease Class 1",
-        ),
-        (
-            "Class 2 Recall",
-            "0.00%",
-            "Disease Class 2",
-        ),
-    ]
-
-    for col, metric in zip(
-        cols,
-        performance_metrics
-    ):
-
-        label, value, sub = metric
-
-        col.markdown(
-            f"""
-            <div class="metric-card">
-
-                <div class="metric-label">
-                    {label}
-                </div>
-
-                <div class="metric-value">
-                    {value}
-                </div>
-
-                <div class="metric-sub">
-                    {sub}
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
+            "Validation"
         )
 
-    st.markdown(
-        '<div class="section-title">Classification Report</div>',
-        unsafe_allow_html=True,
+    with col2:
+
+        st.metric(
+            "Healthy Recall",
+            "96.48%",
+            "Class 0"
+        )
+
+    with col3:
+
+        st.metric(
+            "Disease 1 Recall",
+            "44.29%",
+            "Class 1"
+        )
+
+    with col4:
+
+        st.metric(
+            "Disease 2 Recall",
+            "0.00%",
+            "Class 2"
+        )
+
+    st.divider()
+
+    st.subheader(
+        "Classification Report"
     )
 
     if not report_df.empty:
 
         st.dataframe(
             report_df,
-            use_container_width=True,
+            use_container_width=True
         )
 
-    st.markdown(
-        '<div class="section-title">Confusion Matrix</div>',
-        unsafe_allow_html=True,
+    else:
+
+        st.info(
+            "Classification report was not found."
+        )
+
+    st.subheader(
+        "Confusion Matrix"
     )
 
     if not confusion_df.empty:
 
         st.dataframe(
             confusion_df,
-            use_container_width=True,
+            use_container_width=True
         )
 
-    st.markdown(
-        """
-        <div class="warning-box">
+    else:
 
-        <b>Important:</b>
-        The overall accuracy is 90.78%, but the model currently
-        has very weak performance on Disease Class 2.
-        The 0% recall means the current model should not be
-        interpreted as a reliable detector for that class.
+        st.info(
+            "Confusion matrix was not found."
+        )
 
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.warning(
+        "Important: Overall validation accuracy is 90.78%, "
+        "but Disease Class 2 currently has 0% recall. "
+        "The current model should therefore not be considered "
+        "reliable for detecting Disease Class 2."
     )
 
-    st.markdown(
-        '<div class="section-title">Training History</div>',
-        unsafe_allow_html=True,
+    st.subheader(
+        "Training History"
     )
 
     if not history_df.empty:
 
-        numeric_columns = history_df.select_dtypes(
-            include=np.number
-        ).columns.tolist()
+        numeric_columns = (
+            history_df
+            .select_dtypes(
+                include=np.number
+            )
+            .columns
+            .tolist()
+        )
 
         if numeric_columns:
 
@@ -1039,44 +982,53 @@ elif page == "Model Performance":
                 ]
             )
 
+        else:
+
+            st.info(
+                "No numeric training-history columns found."
+            )
+
+    else:
+
+        st.info(
+            "Training history file was not found."
+        )
+
 
 # ============================================================
-# STEP 14 — PREDICTION VISUALIZATION
+# PAGE 5 — PREDICTION
 # ============================================================
 
 elif page == "Prediction":
 
-    st.subheader(
+    st.header(
         "🔬 AI Hyperspectral Prediction"
     )
 
-    st.markdown(
-        """
-        Upload an HSI tile to run the trained
-        tile-level 3D-CNN model and visualize
-        its prediction.
-        """
+    st.write(
+        "Upload a hyperspectral NPZ tile and run "
+        "the trained tile-level 3D-CNN model."
+    )
+
+    st.info(
+        "Expected input: NPZ file containing an "
+        "'im' array with exactly 20 spectral bands."
     )
 
     uploaded_file = st.file_uploader(
         "Upload hyperspectral NPZ tile",
         type=["npz"],
-        key="prediction_upload",
+        key="prediction_upload"
     )
 
     if uploaded_file is None:
 
-        st.markdown(
-            """
-            <div class="info-box">
+        st.subheader(
+            "Example Input"
+        )
 
-            <b>Supported input:</b> `.npz` hyperspectral tile<br>
-            <b>Expected array:</b> `im`<br>
-            <b>Expected shape:</b> H × W × 20 spectral bands
-
-            </div>
-            """,
-            unsafe_allow_html=True,
+        st.code(
+            "data/raw/hyperspectral/0/0001.npz"
         )
 
     else:
@@ -1090,7 +1042,8 @@ elif page == "Prediction":
             if "im" not in data:
 
                 st.error(
-                    "The uploaded NPZ file does not contain an 'im' array."
+                    "The uploaded NPZ file does not "
+                    "contain an 'im' array."
                 )
 
             else:
@@ -1123,23 +1076,25 @@ elif page == "Prediction":
                     )
 
                     # ------------------------------------------------
-                    # VISUALIZATION CONTROLS
+                    # INPUT VISUALIZATION
                     # ------------------------------------------------
 
-                    st.markdown(
-                        '<div class="section-title">Input Visualization</div>',
-                        unsafe_allow_html=True,
+                    st.subheader(
+                        "1. Input Visualization"
                     )
 
                     selected_band = st.slider(
-                        "Select spectral band for visualization",
+                        "Select spectral band",
                         min_value=0,
                         max_value=EXPECTED_BANDS - 1,
                         value=0,
+                        key="prediction_band"
                     )
 
                     selected_wavelength = (
-                        WAVELENGTHS[selected_band]
+                        WAVELENGTHS[
+                            selected_band
+                        ]
                     )
 
                     original_band = hsi[
@@ -1158,11 +1113,12 @@ elif page == "Prediction":
                     # PREPARE MODEL INPUT
                     # ------------------------------------------------
 
-                    model_tensor = prepare_hyperspectral_tensor(
-                        hsi
+                    model_tensor = (
+                        prepare_hyperspectral_tensor(
+                            hsi
+                        )
                     )
 
-                    # Extract model-view band.
                     model_band = (
                         model_tensor[
                             0,
@@ -1180,11 +1136,9 @@ elif page == "Prediction":
                         )
                     )
 
-                    image_col1, image_col2 = st.columns(
-                        2
-                    )
+                    col1, col2 = st.columns(2)
 
-                    with image_col1:
+                    with col1:
 
                         st.markdown(
                             "#### Original Spectral Band"
@@ -1195,12 +1149,12 @@ elif page == "Prediction":
                             caption=(
                                 f"Band {selected_band + 1} "
                                 f"• {selected_wavelength} nm "
-                                f"• Original {height}×{width}"
+                                f"• {height} × {width}"
                             ),
-                            use_container_width=True,
+                            use_container_width=True
                         )
 
-                    with image_col2:
+                    with col2:
 
                         st.markdown(
                             "#### Model Input Preview"
@@ -1211,24 +1165,24 @@ elif page == "Prediction":
                             caption=(
                                 f"Band {selected_band + 1} "
                                 f"• {selected_wavelength} nm "
-                                f"• Resized 32×32"
+                                f"• 32 × 32"
                             ),
-                            use_container_width=True,
+                            use_container_width=True
                         )
 
                     # ------------------------------------------------
-                    # RUN PREDICTION
+                    # PREDICTION BUTTON
                     # ------------------------------------------------
 
-                    st.markdown(
-                        '<div class="section-title">AI Prediction</div>',
-                        unsafe_allow_html=True,
+                    st.subheader(
+                        "2. Run AI Prediction"
                     )
 
                     if st.button(
                         "🔍 Run Tile-Level AI Prediction",
                         type="primary",
                         use_container_width=True,
+                        key="run_prediction"
                     ):
 
                         try:
@@ -1237,7 +1191,7 @@ elif page == "Prediction":
                                 predicted_class,
                                 confidence,
                                 probabilities,
-                                tensor,
+                                _
                             ) = run_prediction(
                                 hsi
                             )
@@ -1252,13 +1206,7 @@ elif page == "Prediction":
                                     confidence,
 
                                 "probabilities":
-                                    probabilities,
-
-                                "hsi":
-                                    hsi,
-
-                                "selected_band":
-                                    selected_band,
+                                    probabilities
                             }
 
                         except Exception as exc:
@@ -1268,11 +1216,13 @@ elif page == "Prediction":
                             )
 
                     # ------------------------------------------------
-                    # DISPLAY STORED RESULT
+                    # RESULT
                     # ------------------------------------------------
 
-                    result = st.session_state.get(
-                        "prediction_result"
+                    result = (
+                        st.session_state.get(
+                            "prediction_result"
+                        )
                     )
 
                     if result is not None:
@@ -1295,88 +1245,48 @@ elif page == "Prediction":
                             ]
                         )
 
-                        predicted_name = CLASS_NAMES.get(
-                            predicted_class,
-                            f"Class {predicted_class}"
+                        predicted_name = (
+                            CLASS_NAMES.get(
+                                predicted_class,
+                                f"Class {predicted_class}"
+                            )
                         )
 
-                        # --------------------------------------------
-                        # RESULT CARD
-                        # --------------------------------------------
+                        st.divider()
 
-                        st.markdown(
-                            '<div class="section-title">Prediction Result</div>',
-                            unsafe_allow_html=True,
+                        st.subheader(
+                            "3. Prediction Result"
                         )
 
-                        result_col1, result_col2, result_col3 = st.columns(
-                            3
-                        )
+                        col1, col2, col3 = st.columns(3)
 
-                        with result_col1:
+                        with col1:
 
-                            st.markdown(
-                                f"""
-                                <div class="prediction-card">
-
-                                    <div class="prediction-title">
-                                        Predicted Class
-                                    </div>
-
-                                    <div class="prediction-class">
-                                        {predicted_name}
-                                    </div>
-
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
+                            st.metric(
+                                "Predicted Class",
+                                predicted_name
                             )
 
-                        with result_col2:
+                        with col2:
 
-                            st.markdown(
-                                f"""
-                                <div class="prediction-card">
-
-                                    <div class="prediction-title">
-                                        Model Confidence
-                                    </div>
-
-                                    <div class="confidence">
-                                        {confidence * 100:.2f}%
-                                    </div>
-
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
+                            st.metric(
+                                "Model Confidence",
+                                f"{confidence * 100:.2f}%"
                             )
 
-                        with result_col3:
+                        with col3:
 
-                            st.markdown(
-                                f"""
-                                <div class="prediction-card">
-
-                                    <div class="prediction-title">
-                                        Spectral Bands Used
-                                    </div>
-
-                                    <div class="prediction-class">
-                                        {bands}
-                                    </div>
-
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
+                            st.metric(
+                                "Spectral Bands",
+                                str(bands)
                             )
 
-                        # --------------------------------------------
-                        # PROBABILITY VISUALIZATION
-                        # --------------------------------------------
+                        # ------------------------------------------------
+                        # PROBABILITIES
+                        # ------------------------------------------------
 
-                        st.markdown(
-                            '<div class="section-title">Class Probability Distribution</div>',
-                            unsafe_allow_html=True,
+                        st.subheader(
+                            "4. Class Probability Distribution"
                         )
 
                         probability_df = pd.DataFrame(
@@ -1384,46 +1294,48 @@ elif page == "Prediction":
                                 "Class": [
                                     CLASS_NAMES[0],
                                     CLASS_NAMES[1],
-                                    CLASS_NAMES[2],
+                                    CLASS_NAMES[2]
                                 ],
-                                "Probability": (
+                                "Probability (%)": (
                                     probabilities * 100
-                                ),
+                                )
                             }
                         )
 
                         st.bar_chart(
                             probability_df.set_index(
                                 "Class"
-                            ),
-                            y="Probability",
+                            )
                         )
 
-                        probability_display = (
+                        display_probability_df = (
                             probability_df.copy()
                         )
 
-                        probability_display[
-                            "Probability"
-                        ] = probability_display[
-                            "Probability"
-                        ].map(
-                            lambda x: f"{x:.2f}%"
+                        display_probability_df[
+                            "Probability (%)"
+                        ] = (
+                            display_probability_df[
+                                "Probability (%)"
+                            ]
+                            .map(
+                                lambda value:
+                                    f"{value:.2f}%"
+                            )
                         )
 
                         st.dataframe(
-                            probability_display,
+                            display_probability_df,
                             hide_index=True,
-                            use_container_width=True,
+                            use_container_width=True
                         )
 
-                        # --------------------------------------------
+                        # ------------------------------------------------
                         # SPECTRAL SIGNATURE
-                        # --------------------------------------------
+                        # ------------------------------------------------
 
-                        st.markdown(
-                            '<div class="section-title">Mean Spectral Signature</div>',
-                            unsafe_allow_html=True,
+                        st.subheader(
+                            "5. Mean Spectral Signature"
                         )
 
                         spectral_profile = hsi.mean(
@@ -1432,10 +1344,10 @@ elif page == "Prediction":
 
                         spectral_df = pd.DataFrame(
                             {
-                                "Wavelength (nm)": WAVELENGTHS,
-                                "Mean Intensity": (
+                                "Wavelength (nm)":
+                                    WAVELENGTHS,
+                                "Mean Intensity":
                                     spectral_profile
-                                ),
                             }
                         )
 
@@ -1445,119 +1357,123 @@ elif page == "Prediction":
                             )
                         )
 
-                        # --------------------------------------------
+                        # ------------------------------------------------
                         # INTERPRETATION
-                        # --------------------------------------------
+                        # ------------------------------------------------
 
-                        st.markdown(
-                            '<div class="section-title">Prediction Interpretation</div>',
-                            unsafe_allow_html=True,
+                        st.subheader(
+                            "6. Prediction Interpretation"
                         )
 
                         if predicted_class == 0:
 
-                            st.markdown(
-                                """
-                                <div class="success-box">
-
-                                The tile was classified as
-                                <b>Healthy / Normal</b> by the current
-                                3D-CNN model.
-
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
+                            st.success(
+                                "The tile was classified as "
+                                "'Healthy / Normal' by the current "
+                                "3D-CNN model."
                             )
 
                         elif predicted_class == 1:
 
-                            st.markdown(
-                                """
-                                <div class="warning-box">
-
-                                The tile was classified as
-                                <b>Disease Class 1</b>.
-                                This is an AI model prediction and
-                                should be treated as an automated
-                                screening result.
-
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
+                            st.warning(
+                                "The tile was classified as "
+                                "'Disease Class 1'. This is an "
+                                "automated AI screening result and "
+                                "should be validated separately."
                             )
 
                         else:
 
-                            st.markdown(
-                                """
-                                <div class="warning-box">
-
-                                The tile was classified as
-                                <b>Disease Class 2</b>.
-
-                                <br><br>
-
-                                The current validation results show
-                                very weak recall for this class,
-                                so this prediction requires additional
-                                validation.
-
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
+                            st.warning(
+                                "The tile was classified as "
+                                "'Disease Class 2'. The current "
+                                "validation results show very weak "
+                                "recall for this class, so this "
+                                "prediction requires additional validation."
                             )
 
-                        # --------------------------------------------
+                        # ------------------------------------------------
+                        # CONFIDENCE
+                        # ------------------------------------------------
+
+                        st.subheader(
+                            "7. Confidence Assessment"
+                        )
+
+                        if confidence >= 0.80:
+
+                            st.success(
+                                f"High model confidence: "
+                                f"{confidence * 100:.2f}%"
+                            )
+
+                        elif confidence >= 0.50:
+
+                            st.warning(
+                                f"Moderate model confidence: "
+                                f"{confidence * 100:.2f}%"
+                            )
+
+                        else:
+
+                            st.warning(
+                                f"Low model confidence: "
+                                f"{confidence * 100:.2f}%. "
+                                "Treat the result cautiously."
+                            )
+
+                        # ------------------------------------------------
                         # MODEL DETAILS
-                        # --------------------------------------------
+                        # ------------------------------------------------
 
-                        st.markdown(
-                            '<div class="section-title">Inference Details</div>',
-                            unsafe_allow_html=True,
+                        st.subheader(
+                            "8. Inference Details"
                         )
 
-                        detail_col1, detail_col2 = st.columns(
-                            2
-                        )
+                        col1, col2 = st.columns(2)
 
-                        with detail_col1:
+                        with col1:
 
-                            st.markdown(
-                                """
-                                <div class="info-box">
-
-                                <b>Architecture:</b> 3D-CNN<br>
-                                <b>Input:</b> 20 spectral bands<br>
-                                <b>Model input:</b> 20 × 32 × 32<br>
-                                <b>Output classes:</b> 3<br>
-                                <b>Parameters:</b> 18,243
-
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
+                            st.write(
+                                "**Architecture:** 3D-CNN"
                             )
 
-                        with detail_col2:
-
-                            st.markdown(
-                                """
-                                <div class="info-box">
-
-                                <b>Model:</b> Tile-level split model<br>
-                                <b>Checkpoint:</b>
-                                terraspectra_3dcnn_tilesplit_best.pt<br>
-                                <b>Inference:</b> CPU compatible<br>
-                                <b>Visualization:</b>
-                                Spectral + probability analysis
-
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
+                            st.write(
+                                "**Input:** 20 spectral bands"
                             )
 
-                        st.caption(
-                            "Note: This visualization represents a tile-level classification. "
-                            "It does not indicate pixel-level disease segmentation."
+                            st.write(
+                                "**Model Input:** 20 × 32 × 32"
+                            )
+
+                            st.write(
+                                "**Output Classes:** 3"
+                            )
+
+                        with col2:
+
+                            st.write(
+                                "**Parameters:** 18,243"
+                            )
+
+                            st.write(
+                                "**Inference:** CPU compatible"
+                            )
+
+                            st.write(
+                                "**Prediction Type:** "
+                                "Tile-level classification"
+                            )
+
+                            st.write(
+                                "**Checkpoint:** "
+                                "terraspectra_3dcnn_tilesplit_best.pt"
+                            )
+
+                        st.info(
+                            "This model performs tile-level classification. "
+                            "It does not produce pixel-level disease "
+                            "segmentation or a true disease heatmap."
                         )
 
         except Exception as exc:
@@ -1568,18 +1484,19 @@ elif page == "Prediction":
 
 
 # ============================================================
-# MONITORING
+# PAGE 6 — MONITORING
 # ============================================================
 
 elif page == "Monitoring":
 
-    st.subheader(
+    st.header(
         "Agricultural Monitoring"
     )
 
     st.info(
-        "Monitoring visualization is currently a prototype. "
-        "GIS-linked geospatial inference will be added in the next phase."
+        "The current monitoring page is a prototype. "
+        "GIS-linked geospatial inference will be added "
+        "in a later project phase."
     )
 
     np.random.seed(42)
@@ -1592,25 +1509,18 @@ elif page == "Monitoring":
     )
 
     st.subheader(
-        "Field Risk Visualization"
+        "Field Risk Visualization Prototype"
     )
 
     st.dataframe(
         monitoring_grid.style.format(
             "{:.2f}"
         ),
-        use_container_width=True,
+        use_container_width=True
     )
 
-    st.markdown(
-        """
-        <div class="info-box">
-
-        Future versions will connect model predictions
-        with geospatial coordinates to provide field-level
-        disease monitoring and risk mapping.
-
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.info(
+        "Future versions will connect model predictions "
+        "with geographic coordinates to provide field-level "
+        "disease monitoring and risk mapping."
     )
