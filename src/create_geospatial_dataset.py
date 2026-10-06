@@ -4,43 +4,34 @@ import numpy as np
 import pandas as pd
 
 
-# ============================================================
-# PATHS
-# ============================================================
-
+# ---------------------------------------------------------
+# Paths
+# ---------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-PREDICTIONS_PATH = (
-    PROJECT_ROOT
-    / "outputs"
-    / "tilesplit_predictions.csv"
-)
-
-OUTPUT_PATH = (
-    PROJECT_ROOT
-    / "outputs"
-    / "geospatial_predictions.csv"
-)
+INPUT_CSV = PROJECT_ROOT / "outputs" / "tilesplit_predictions.csv"
+OUTPUT_CSV = PROJECT_ROOT / "outputs" / "geospatial_predictions.csv"
 
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-# Demo field center.
-# These coordinates are SIMULATED and are NOT actual
-# coordinates from the hyperspectral dataset.
-
+# ---------------------------------------------------------
+# Demo field configuration
+# IMPORTANT:
+# These coordinates are simulated because the dataset
+# does not contain real GPS/geospatial coordinates.
+# ---------------------------------------------------------
 FIELD_CENTER_LAT = 21.1702
 FIELD_CENTER_LON = 72.8311
 
-GRID_ROWS = 10
-GRID_COLS = 10
-
+GRID_SIZE = 10
 LAT_SPACING = 0.0005
 LON_SPACING = 0.0005
 
+MAX_SAMPLES = 100
 
+
+# ---------------------------------------------------------
+# Class information
+# ---------------------------------------------------------
 CLASS_NAMES = {
     0: "Healthy / Normal",
     1: "Disease Class 1",
@@ -48,252 +39,176 @@ CLASS_NAMES = {
 }
 
 
-# ============================================================
-# LOAD PREDICTIONS
-# ============================================================
-
-if not PREDICTIONS_PATH.exists():
-
+# ---------------------------------------------------------
+# Load prediction results
+# ---------------------------------------------------------
+if not INPUT_CSV.exists():
     raise FileNotFoundError(
-        f"Prediction file not found:\n"
-        f"{PREDICTIONS_PATH}"
+        f"Prediction file not found:\n{INPUT_CSV}"
     )
 
+df = pd.read_csv(INPUT_CSV)
 
-predictions = pd.read_csv(
-    PREDICTIONS_PATH
-)
+required_columns = {"actual_class", "predicted_class"}
 
-print(
-    f"Loaded {len(predictions):,} prediction records."
-)
+missing_columns = required_columns - set(df.columns)
 
+if missing_columns:
+    raise ValueError(
+        f"Missing required columns: {sorted(missing_columns)}"
+    )
 
-# ============================================================
-# DETECT COLUMNS
-# ============================================================
-
-def find_column(df, candidates):
-
-    for candidate in candidates:
-
-        if candidate in df.columns:
-            return candidate
-
-    lower_map = {
-        str(column).lower(): column
-        for column in df.columns
-    }
-
-    for candidate in candidates:
-
-        if candidate.lower() in lower_map:
-            return lower_map[candidate.lower()]
-
-    return None
+print(f"Loaded {len(df):,} prediction records.")
 
 
-prediction_column = find_column(
-    predictions,
-    [
-        "predicted_class",
-        "prediction",
-        "predicted",
-        "pred",
-    ]
-)
-
-confidence_column = find_column(
-    predictions,
-    [
-        "confidence",
-        "probability",
-        "score",
-    ]
-)
+# ---------------------------------------------------------
+# Limit samples for demo field visualization
+# ---------------------------------------------------------
+geo_df = df.head(MAX_SAMPLES).copy().reset_index(drop=True)
 
 
-# ============================================================
-# CREATE DEMO GEOSPATIAL GRID
-# ============================================================
+# ---------------------------------------------------------
+# Create simulated coordinates
+# ---------------------------------------------------------
+coordinates = []
 
-sample_size = min(
-    len(predictions),
-    GRID_ROWS * GRID_COLS
-)
+half_grid = GRID_SIZE // 2
 
-geo_predictions = predictions.head(
-    sample_size
-).copy()
+for index in range(len(geo_df)):
 
-latitudes = []
-longitudes = []
-
-
-for index in range(sample_size):
-
-    row = index // GRID_COLS
-    col = index % GRID_COLS
+    row = index // GRID_SIZE
+    col = index % GRID_SIZE
 
     latitude = (
         FIELD_CENTER_LAT
-        + (row - GRID_ROWS / 2)
-        * LAT_SPACING
+        + (row - half_grid) * LAT_SPACING
     )
 
     longitude = (
         FIELD_CENTER_LON
-        + (col - GRID_COLS / 2)
-        * LON_SPACING
+        + (col - half_grid) * LON_SPACING
     )
 
-    latitudes.append(latitude)
-    longitudes.append(longitude)
+    coordinates.append((latitude, longitude))
 
 
-geo_predictions["latitude"] = latitudes
-geo_predictions["longitude"] = longitudes
+geo_df["latitude"] = [coord[0] for coord in coordinates]
+geo_df["longitude"] = [coord[1] for coord in coordinates]
 
 
-# ============================================================
-# STANDARDIZE PREDICTION INFORMATION
-# ============================================================
+# ---------------------------------------------------------
+# Prediction class
+# ---------------------------------------------------------
+geo_df["predicted_class"] = (
+    geo_df["predicted_class"]
+    .astype(int)
+)
 
-if prediction_column:
+geo_df["actual_class"] = (
+    geo_df["actual_class"]
+    .astype(int)
+)
 
-    geo_predictions["predicted_class"] = (
-        pd.to_numeric(
-            geo_predictions[prediction_column],
-            errors="coerce"
-        )
-        .fillna(0)
-        .astype(int)
-    )
-
-else:
-
-    # Fallback only if prediction column cannot be detected.
-    np.random.seed(42)
-
-    geo_predictions["predicted_class"] = (
-        np.random.choice(
-            [0, 1, 2],
-            size=sample_size,
-            p=[0.70, 0.20, 0.10]
-        )
-    )
-
-
-geo_predictions["class_name"] = (
-    geo_predictions["predicted_class"]
+geo_df["class_name"] = (
+    geo_df["predicted_class"]
     .map(CLASS_NAMES)
     .fillna("Unknown")
 )
 
 
-if confidence_column:
-
-    geo_predictions["confidence"] = (
-        pd.to_numeric(
-            geo_predictions[confidence_column],
-            errors="coerce"
-        )
-        .fillna(0.0)
-    )
-
-else:
-
-    geo_predictions["confidence"] = 0.0
-
-
-# ============================================================
-# RISK LEVEL
-# ============================================================
-
-def determine_risk(row):
-
-    predicted_class = int(
-        row["predicted_class"]
-    )
-
-    confidence = float(
-        row["confidence"]
-    )
-
+# ---------------------------------------------------------
+# Risk level
+# ---------------------------------------------------------
+def get_risk_level(predicted_class):
     if predicted_class == 0:
-
         return "Low"
 
     if predicted_class == 1:
-
-        if confidence >= 0.70:
-            return "High"
-
         return "Moderate"
 
     if predicted_class == 2:
-
         return "High"
 
     return "Unknown"
 
 
-geo_predictions["risk_level"] = (
-    geo_predictions.apply(
-        determine_risk,
-        axis=1
-    )
+geo_df["risk_level"] = (
+    geo_df["predicted_class"]
+    .apply(get_risk_level)
 )
 
 
-# ============================================================
-# METADATA
-# ============================================================
+# ---------------------------------------------------------
+# Confidence
+# ---------------------------------------------------------
+# The current tilesplit_predictions.csv does NOT contain
+# probability/confidence information.
+#
+# Therefore, do NOT invent confidence values.
+geo_df["confidence"] = np.nan
 
-geo_predictions["coordinate_source"] = (
+
+# ---------------------------------------------------------
+# Metadata
+# ---------------------------------------------------------
+geo_df["confidence_status"] = "Not available from evaluation CSV"
+
+geo_df["coordinate_source"] = (
     "SIMULATED DEMO COORDINATES"
 )
 
-geo_predictions["field_id"] = (
-    "DEMO_FIELD_001"
-)
+geo_df["field_id"] = "DEMO_FIELD_001"
 
 
-# ============================================================
-# SAVE
-# ============================================================
+# ---------------------------------------------------------
+# Arrange columns
+# ---------------------------------------------------------
+geo_df = geo_df[
+    [
+        "field_id",
+        "latitude",
+        "longitude",
+        "actual_class",
+        "predicted_class",
+        "class_name",
+        "confidence",
+        "confidence_status",
+        "risk_level",
+        "coordinate_source",
+    ]
+]
 
-OUTPUT_PATH.parent.mkdir(
+
+# ---------------------------------------------------------
+# Save
+# ---------------------------------------------------------
+OUTPUT_CSV.parent.mkdir(
     parents=True,
     exist_ok=True
 )
 
-geo_predictions.to_csv(
-    OUTPUT_PATH,
+geo_df.to_csv(
+    OUTPUT_CSV,
     index=False
 )
 
 
+# ---------------------------------------------------------
+# Display result
+# ---------------------------------------------------------
 print()
-print(
-    f"Saved geospatial dataset to:"
-)
-print(
-    OUTPUT_PATH
-)
+print("Saved geospatial dataset to:")
+print(OUTPUT_CSV)
 
 print()
+print(geo_df.head(10).to_string(index=False))
+
+print()
+print("Prediction distribution:")
 print(
-    geo_predictions[
-        [
-            "latitude",
-            "longitude",
-            "predicted_class",
-            "class_name",
-            "confidence",
-            "risk_level",
-        ]
-    ].head(10)
+    geo_df["class_name"]
+    .value_counts()
+    .to_string()
 )
 
 print()
