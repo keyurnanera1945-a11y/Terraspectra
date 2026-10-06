@@ -1,22 +1,8 @@
 from pathlib import Path
-import inspect
-import sys
-
 import numpy as np
 import pandas as pd
+import requests
 import streamlit as st
-
-
-# ============================================================
-# PYTORCH
-# ============================================================
-
-try:
-    import torch
-    import torch.nn.functional as F
-except ImportError:
-    torch = None
-    F = None
 
 
 # ============================================================
@@ -24,24 +10,8 @@ except ImportError:
 # ============================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_DIR = PROJECT_ROOT / "src"
 
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-from model_3dcnn import TerraSpectra3DCNN
-
-
-PATCH_CSV_PATH = (
-    PROJECT_ROOT / "outputs" / "hyperspectral_patches.csv"
-)
-
-TILESPLIT_MODEL_PATH = (
-    PROJECT_ROOT
-    / "outputs"
-    / "models"
-    / "terraspectra_3dcnn_tilesplit_best.pt"
-)
+PATCH_CSV_PATH = PROJECT_ROOT / "outputs" / "hyperspectral_patches.csv"
 
 TILESPLIT_CONFUSION_PATH = (
     PROJECT_ROOT / "outputs" / "tilesplit_confusion_matrix.csv"
@@ -61,17 +31,26 @@ TILESPLIT_HISTORY_PATH = (
 
 
 # ============================================================
+# FASTAPI
+# ============================================================
+
+API_URL = "http://127.0.0.1:8000"
+
+HEALTH_ENDPOINT = f"{API_URL}/health"
+PREDICT_ENDPOINT = f"{API_URL}/predict"
+
+
+# ============================================================
 # CONSTANTS
 # ============================================================
+
+EXPECTED_BANDS = 20
 
 CLASS_NAMES = {
     0: "Healthy / Normal",
     1: "Disease Class 1",
     2: "Disease Class 2",
 }
-
-EXPECTED_BANDS = 20
-PATCH_SIZE = 32
 
 WAVELENGTHS = [
     420, 440, 500, 520, 540,
@@ -94,39 +73,11 @@ st.set_page_config(
 
 
 # ============================================================
-# CSS
-# ============================================================
-
-st.markdown(
-    """
-    <style>
-
-    .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 2rem;
-        max-width: 1450px;
-    }
-
-    [data-testid="stMetric"] {
-        background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 12px;
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-# ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 
 def find_column(df, candidates):
     for candidate in candidates:
-
         if candidate in df.columns:
             return candidate
 
@@ -136,7 +87,6 @@ def find_column(df, candidates):
     }
 
     for candidate in candidates:
-
         if candidate.lower() in lower_map:
             return lower_map[candidate.lower()]
 
@@ -144,74 +94,52 @@ def find_column(df, candidates):
 
 
 def normalize_band_for_display(band):
-    """
-    Convert raw hyperspectral values to 0-1
-    for safe Streamlit image display.
-    """
-
-    band = np.asarray(
-        band,
-        dtype=np.float32
-    )
+    band = np.asarray(band, dtype=np.float32)
 
     if not np.isfinite(band).all():
         raise ValueError(
             "Spectral band contains NaN or infinite values."
         )
 
-    min_value = float(band.min())
-    max_value = float(band.max())
+    minimum = float(band.min())
+    maximum = float(band.max())
 
-    if max_value > min_value:
-
-        band = (
-            band - min_value
-        ) / (
-            max_value - min_value
-        )
-
+    if maximum > minimum:
+        band = (band - minimum) / (maximum - minimum)
     else:
-
         band = np.zeros_like(band)
 
-    return np.clip(
-        band,
-        0.0,
-        1.0
-    )
+    return np.clip(band, 0.0, 1.0)
 
+
+# ============================================================
+# LOAD DATA
+# ============================================================
 
 @st.cache_data
 def load_patch_data():
-
     if not PATCH_CSV_PATH.exists():
         return pd.DataFrame()
 
     try:
-        return pd.read_csv(
-            PATCH_CSV_PATH
-        )
+        return pd.read_csv(PATCH_CSV_PATH)
     except Exception:
         return pd.DataFrame()
 
 
 @st.cache_data
 def load_predictions():
-
     if not TILESPLIT_PREDICTIONS_PATH.exists():
         return pd.DataFrame()
 
     try:
-        return pd.read_csv(
-            TILESPLIT_PREDICTIONS_PATH
-        )
+        return pd.read_csv(TILESPLIT_PREDICTIONS_PATH)
     except Exception:
         return pd.DataFrame()
 
 
 @st.cache_data
 def load_report():
-
     if not TILESPLIT_REPORT_PATH.exists():
         return pd.DataFrame()
 
@@ -226,21 +154,17 @@ def load_report():
 
 @st.cache_data
 def load_history():
-
     if not TILESPLIT_HISTORY_PATH.exists():
         return pd.DataFrame()
 
     try:
-        return pd.read_csv(
-            TILESPLIT_HISTORY_PATH
-        )
+        return pd.read_csv(TILESPLIT_HISTORY_PATH)
     except Exception:
         return pd.DataFrame()
 
 
 @st.cache_data
 def load_confusion_matrix():
-
     if not TILESPLIT_CONFUSION_PATH.exists():
         return pd.DataFrame()
 
@@ -253,234 +177,92 @@ def load_confusion_matrix():
         return pd.DataFrame()
 
 
-def prepare_hyperspectral_tensor(hsi):
+# ============================================================
+# FASTAPI HEALTH CHECK
+# ============================================================
 
-    if torch is None or F is None:
-        raise RuntimeError(
-            "PyTorch is not installed."
-        )
-
-    hsi = np.asarray(
-        hsi,
-        dtype=np.float32
-    )
-
-    if hsi.ndim != 3:
-        raise ValueError(
-            "Expected H × W × Bands hyperspectral data."
-        )
-
-    height, width, bands = hsi.shape
-
-    if bands != EXPECTED_BANDS:
-        raise ValueError(
-            f"Expected {EXPECTED_BANDS} bands, "
-            f"but received {bands}."
-        )
-
-    if not np.isfinite(hsi).all():
-        raise ValueError(
-            "Hyperspectral data contains NaN or infinite values."
-        )
-
-    # Normalize raw uint16 HSI.
-    hsi = hsi / 65535.0
-
-    hsi = np.clip(
-        hsi,
-        0.0,
-        1.0
-    )
-
-    # HWC -> CHW
-    hsi = np.transpose(
-        hsi,
-        (2, 0, 1)
-    )
-
-    tensor = torch.from_numpy(
-        hsi
-    ).float()
-
-    # [Bands, H, W]
-    tensor = tensor.unsqueeze(0)
-
-    # [1, Bands, H, W]
-    tensor = tensor.unsqueeze(0)
-
-    # [1, 1, Bands, H, W]
-    tensor = F.interpolate(
-        tensor,
-        size=(
-            EXPECTED_BANDS,
-            PATCH_SIZE,
-            PATCH_SIZE
-        ),
-        mode="trilinear",
-        align_corners=False
-    )
-
-    return tensor
-
-
-def create_terraspectra_model():
-
-    signature = inspect.signature(
-        TerraSpectra3DCNN
-    )
-
-    parameters = signature.parameters
-
-    kwargs = {}
-
-    if "num_classes" in parameters:
-        kwargs["num_classes"] = 3
-
-    if "in_channels" in parameters:
-        kwargs["in_channels"] = 1
-
-    if "input_channels" in parameters:
-        kwargs["input_channels"] = 1
-
-    if "channels" in parameters:
-        kwargs["channels"] = 1
-
+def check_api_status():
     try:
-
-        return TerraSpectra3DCNN(
-            **kwargs
+        response = requests.get(
+            HEALTH_ENDPOINT,
+            timeout=3
         )
 
-    except TypeError:
+        if response.status_code == 200:
+            return True, response.json()
 
-        return TerraSpectra3DCNN()
+        return False, None
 
-
-@st.cache_resource
-def load_prediction_model():
-
-    if torch is None:
-        raise RuntimeError(
-            "PyTorch is not available."
-        )
-
-    if not TILESPLIT_MODEL_PATH.exists():
-        raise FileNotFoundError(
-            "Model file not found:\n"
-            f"{TILESPLIT_MODEL_PATH}"
-        )
-
-    model = create_terraspectra_model()
-
-    try:
-
-        checkpoint = torch.load(
-            TILESPLIT_MODEL_PATH,
-            map_location="cpu",
-            weights_only=False
-        )
-
-    except TypeError:
-
-        checkpoint = torch.load(
-            TILESPLIT_MODEL_PATH,
-            map_location="cpu"
-        )
-
-    if isinstance(checkpoint, dict):
-
-        if "model_state_dict" in checkpoint:
-
-            state_dict = checkpoint[
-                "model_state_dict"
-            ]
-
-        elif "state_dict" in checkpoint:
-
-            state_dict = checkpoint[
-                "state_dict"
-            ]
-
-        else:
-
-            state_dict = checkpoint
-
-    else:
-
-        state_dict = checkpoint
-
-    cleaned_state_dict = {}
-
-    for key, value in state_dict.items():
-
-        new_key = key
-
-        if new_key.startswith("module."):
-            new_key = new_key[
-                len("module.") :
-            ]
-
-        cleaned_state_dict[
-            new_key
-        ] = value
-
-    model.load_state_dict(
-        cleaned_state_dict,
-        strict=True
-    )
-
-    model.eval()
-
-    return model
-
-
-def run_prediction(hsi):
-
-    tensor = prepare_hyperspectral_tensor(
-        hsi
-    )
-
-    model = load_prediction_model()
-
-    with torch.no_grad():
-
-        logits = model(
-            tensor
-        )
-
-        probabilities = torch.softmax(
-            logits,
-            dim=1
-        )[0]
-
-        predicted_class = int(
-            torch.argmax(
-                probabilities
-            ).item()
-        )
-
-        confidence = float(
-            probabilities[
-                predicted_class
-            ].item()
-        )
-
-    probability_values = (
-        probabilities
-        .cpu()
-        .numpy()
-    )
-
-    return (
-        predicted_class,
-        confidence,
-        probability_values,
-        tensor
-    )
+    except requests.exceptions.RequestException:
+        return False, None
 
 
 # ============================================================
-# LOAD DATA
+# FASTAPI PREDICTION
+# ============================================================
+
+def predict_with_api(uploaded_file):
+    try:
+        response = requests.post(
+            PREDICT_ENDPOINT,
+            files={
+                "file": (
+                    uploaded_file.name,
+                    uploaded_file.getvalue(),
+                    "application/octet-stream",
+                )
+            },
+            timeout=120,
+        )
+
+    except requests.exceptions.ConnectionError:
+        raise RuntimeError(
+            "Could not connect to FastAPI.\n\n"
+            "Start the backend using:\n"
+            "python -m uvicorn api.main:app --reload"
+        )
+
+    except requests.exceptions.Timeout:
+        raise RuntimeError(
+            "FastAPI prediction request timed out."
+        )
+
+    except requests.exceptions.RequestException as exc:
+        raise RuntimeError(
+            f"FastAPI request failed: {exc}"
+        )
+
+    if response.status_code != 200:
+        try:
+            detail = response.json().get(
+                "detail",
+                response.text
+            )
+        except Exception:
+            detail = response.text
+
+        raise RuntimeError(
+            f"FastAPI returned HTTP "
+            f"{response.status_code}: {detail}"
+        )
+
+    try:
+        result = response.json()
+    except Exception:
+        raise RuntimeError(
+            "FastAPI returned invalid JSON."
+        )
+
+    if not result.get("success", False):
+        raise RuntimeError(
+            "FastAPI prediction was not successful."
+        )
+
+    return result
+
+
+# ============================================================
+# LOAD DASHBOARD DATA
 # ============================================================
 
 patch_df = load_patch_data()
@@ -494,9 +276,7 @@ confusion_df = load_confusion_matrix()
 # SIDEBAR
 # ============================================================
 
-st.sidebar.title(
-    "🌱 TerraSpectra AI"
-)
+st.sidebar.title("🌱 TerraSpectra AI")
 
 st.sidebar.caption(
     "Hyperspectral Potato Disease Monitoring"
@@ -512,24 +292,33 @@ page = st.sidebar.radio(
         "Spectral Analysis",
         "Model Performance",
         "Prediction",
-        "Monitoring"
+        "Monitoring",
     ]
 )
+
+api_online, api_data = check_api_status()
+
+if api_online:
+    st.sidebar.success(
+        "🟢 FastAPI Backend: Online"
+    )
+else:
+    st.sidebar.error(
+        "🔴 FastAPI Backend: Offline"
+    )
 
 st.sidebar.divider()
 
 st.sidebar.caption(
-    "3D-CNN • Hyperspectral Imaging • AI"
+    "3D-CNN • Hyperspectral Imaging • FastAPI"
 )
 
 
 # ============================================================
-# MAIN TITLE
+# MAIN HEADER
 # ============================================================
 
-st.title(
-    "🌱 TerraSpectra AI"
-)
+st.title("🌱 TerraSpectra AI")
 
 st.caption(
     "Hyperspectral potato disease monitoring "
@@ -543,13 +332,9 @@ st.caption(
 
 if page == "Overview":
 
-    st.header(
-        "System Overview"
-    )
+    st.header("System Overview")
 
     total_tiles = 1115
-
-    total_bands = EXPECTED_BANDS
 
     total_patches = (
         len(patch_df)
@@ -557,14 +342,9 @@ if page == "Overview":
         else 8688
     )
 
-    validation_samples = 1725
-
-    accuracy = 0.9078
-
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-
         st.metric(
             "HSI Tiles",
             f"{total_tiles:,}",
@@ -572,15 +352,13 @@ if page == "Overview":
         )
 
     with col2:
-
         st.metric(
             "Spectral Bands",
-            total_bands,
+            EXPECTED_BANDS,
             "Bands per HSI tile"
         )
 
     with col3:
-
         st.metric(
             "Extracted Patches",
             f"{total_patches:,}",
@@ -588,68 +366,41 @@ if page == "Overview":
         )
 
     with col4:
-
         st.metric(
             "Validation Accuracy",
-            f"{accuracy * 100:.2f}%",
+            "90.78%",
             "Tile-level 3D-CNN"
         )
 
     st.divider()
 
-    st.subheader(
-        "Current AI Model"
-    )
+    st.subheader("Current AI Model")
 
     col1, col2 = st.columns(2)
 
     with col1:
-
-        st.write(
-            "**Architecture:** Tile-Level 3D-CNN"
-        )
-
-        st.write(
-            "**Input:** 20-band hyperspectral tile"
-        )
-
-        st.write(
-            "**Model Input:** 20 × 32 × 32"
-        )
-
-        st.write(
-            "**Output Classes:** 3"
-        )
+        st.write("**Architecture:** Tile-Level 3D-CNN")
+        st.write("**Input:** 20-band hyperspectral tile")
+        st.write("**Model Input:** 20 × 32 × 32")
+        st.write("**Output Classes:** 3")
 
     with col2:
-
-        st.write(
-            "**Validation Samples:** 1,725"
-        )
-
-        st.write(
-            "**Best Validation Accuracy:** 90.78%"
-        )
-
-        st.write(
-            "**Parameters:** 18,243"
-        )
-
-        st.write(
-            "**Checkpoint:** "
-            "terraspectra_3dcnn_tilesplit_best.pt"
-        )
+        st.write("**Validation Samples:** 1,725")
+        st.write("**Best Validation Accuracy:** 90.78%")
+        st.write("**Parameters:** 18,243")
+        st.write("**Backend:** FastAPI")
 
     st.divider()
 
-    st.subheader(
-        "Project Status"
-    )
-
-    st.success(
-        "Tile-level training, evaluation, dashboard "
-        "integration, and prediction visualization are implemented."
-    )
+    if api_online:
+        st.success(
+            "Dashboard and FastAPI backend are connected."
+        )
+    else:
+        st.warning(
+            "Dashboard is running, but the FastAPI backend "
+            "is currently offline."
+        )
 
 
 # ============================================================
@@ -658,9 +409,7 @@ if page == "Overview":
 
 elif page == "Data Explorer":
 
-    st.header(
-        "Hyperspectral Dataset Explorer"
-    )
+    st.header("Hyperspectral Dataset Explorer")
 
     if patch_df.empty:
 
@@ -674,9 +423,7 @@ elif page == "Data Explorer":
             f"Loaded {len(patch_df):,} extracted patches."
         )
 
-        st.subheader(
-            "Dataset Preview"
-        )
+        st.subheader("Dataset Preview")
 
         st.dataframe(
             patch_df.head(100),
@@ -689,26 +436,26 @@ elif page == "Data Explorer":
                 "label",
                 "class",
                 "target",
-                "disease"
+                "disease",
             ]
         )
 
         if label_column:
 
-            st.subheader(
-                "Class Distribution"
-            )
+            st.subheader("Class Distribution")
 
             distribution = (
-                patch_df[
-                    label_column
-                ]
+                patch_df[label_column]
                 .value_counts()
                 .sort_index()
             )
 
-            st.bar_chart(
-                distribution
+            st.bar_chart(distribution)
+
+        else:
+
+            st.info(
+                "No label/class column was detected."
             )
 
 
@@ -718,9 +465,7 @@ elif page == "Data Explorer":
 
 elif page == "Spectral Analysis":
 
-    st.header(
-        "Spectral Analysis"
-    )
+    st.header("Spectral Analysis")
 
     uploaded_file = st.file_uploader(
         "Upload a hyperspectral .npz file",
@@ -739,9 +484,7 @@ elif page == "Spectral Analysis":
 
         try:
 
-            data = np.load(
-                uploaded_file
-            )
+            data = np.load(uploaded_file)
 
             if "im" not in data:
 
@@ -757,7 +500,8 @@ elif page == "Spectral Analysis":
                 if hsi.ndim != 3:
 
                     st.error(
-                        "Expected H × W × Bands hyperspectral data."
+                        "Expected H × W × Bands "
+                        "hyperspectral data."
                     )
 
                 else:
@@ -773,32 +517,21 @@ elif page == "Spectral Analysis":
                         "Select spectral band",
                         min_value=0,
                         max_value=bands - 1,
-                        value=0
+                        value=0,
+                        key="spectral_band"
                     )
 
-                    display_band = (
-                        normalize_band_for_display(
-                            hsi[
-                                :,
-                                :,
-                                band_number
-                            ]
-                        )
+                    display_band = normalize_band_for_display(
+                        hsi[:, :, band_number]
                     )
 
                     col1, col2 = st.columns(2)
 
                     with col1:
 
-                        if band_number < len(
-                            WAVELENGTHS
-                        ):
+                        if band_number < len(WAVELENGTHS):
 
-                            wavelength = (
-                                WAVELENGTHS[
-                                    band_number
-                                ]
-                            )
+                            wavelength = WAVELENGTHS[band_number]
 
                             caption = (
                                 f"Band {band_number + 1} "
@@ -823,43 +556,46 @@ elif page == "Spectral Analysis":
                             axis=(0, 1)
                         )
 
+                        if bands == EXPECTED_BANDS:
+
+                            x_values = WAVELENGTHS
+
+                        else:
+
+                            x_values = list(
+                                range(1, bands + 1)
+                            )
+
                         spectral_df = pd.DataFrame(
                             {
-                                "Wavelength (nm)":
-                                    WAVELENGTHS[:bands],
-                                "Mean Intensity":
-                                    spectral_profile
+                                "Wavelength / Band": x_values,
+                                "Mean Intensity": spectral_profile,
                             }
                         )
 
                         st.line_chart(
                             spectral_df.set_index(
-                                "Wavelength (nm)"
+                                "Wavelength / Band"
                             )
                         )
 
-                    st.subheader(
-                        "Spectral Statistics"
-                    )
+                    st.subheader("Spectral Statistics")
 
                     col1, col2, col3 = st.columns(3)
 
                     with col1:
-
                         st.metric(
                             "Minimum",
                             f"{float(hsi.min()):.2f}"
                         )
 
                     with col2:
-
                         st.metric(
                             "Maximum",
                             f"{float(hsi.max()):.2f}"
                         )
 
                     with col3:
-
                         st.metric(
                             "Mean",
                             f"{float(hsi.mean()):.2f}"
@@ -878,14 +614,11 @@ elif page == "Spectral Analysis":
 
 elif page == "Model Performance":
 
-    st.header(
-        "Tile-Level 3D-CNN Performance"
-    )
+    st.header("Tile-Level 3D-CNN Performance")
 
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-
         st.metric(
             "Accuracy",
             "90.78%",
@@ -893,7 +626,6 @@ elif page == "Model Performance":
         )
 
     with col2:
-
         st.metric(
             "Healthy Recall",
             "96.48%",
@@ -901,7 +633,6 @@ elif page == "Model Performance":
         )
 
     with col3:
-
         st.metric(
             "Disease 1 Recall",
             "44.29%",
@@ -909,7 +640,6 @@ elif page == "Model Performance":
         )
 
     with col4:
-
         st.metric(
             "Disease 2 Recall",
             "0.00%",
@@ -918,9 +648,7 @@ elif page == "Model Performance":
 
     st.divider()
 
-    st.subheader(
-        "Classification Report"
-    )
+    st.subheader("Classification Report")
 
     if not report_df.empty:
 
@@ -935,9 +663,7 @@ elif page == "Model Performance":
             "Classification report was not found."
         )
 
-    st.subheader(
-        "Confusion Matrix"
-    )
+    st.subheader("Confusion Matrix")
 
     if not confusion_df.empty:
 
@@ -959,17 +685,13 @@ elif page == "Model Performance":
         "reliable for detecting Disease Class 2."
     )
 
-    st.subheader(
-        "Training History"
-    )
+    st.subheader("Training History")
 
     if not history_df.empty:
 
         numeric_columns = (
             history_df
-            .select_dtypes(
-                include=np.number
-            )
+            .select_dtypes(include=np.number)
             .columns
             .tolist()
         )
@@ -977,9 +699,7 @@ elif page == "Model Performance":
         if numeric_columns:
 
             st.line_chart(
-                history_df[
-                    numeric_columns
-                ]
+                history_df[numeric_columns]
             )
 
         else:
@@ -1001,14 +721,28 @@ elif page == "Model Performance":
 
 elif page == "Prediction":
 
-    st.header(
-        "🔬 AI Hyperspectral Prediction"
-    )
+    st.header("🔬 AI Hyperspectral Prediction")
 
     st.write(
-        "Upload a hyperspectral NPZ tile and run "
-        "the trained tile-level 3D-CNN model."
+        "Upload a hyperspectral NPZ tile and send it "
+        "to the FastAPI backend for 3D-CNN inference."
     )
+
+    if api_online:
+
+        st.success(
+            "FastAPI inference backend is online."
+        )
+
+    else:
+
+        st.error(
+            "FastAPI backend is offline."
+        )
+
+        st.code(
+            "python -m uvicorn api.main:app --reload"
+        )
 
     st.info(
         "Expected input: NPZ file containing an "
@@ -1023,9 +757,7 @@ elif page == "Prediction":
 
     if uploaded_file is None:
 
-        st.subheader(
-            "Example Input"
-        )
+        st.subheader("Example Input")
 
         st.code(
             "data/raw/hyperspectral/0/0001.npz"
@@ -1035,9 +767,7 @@ elif page == "Prediction":
 
         try:
 
-            data = np.load(
-                uploaded_file
-            )
+            data = np.load(uploaded_file)
 
             if "im" not in data:
 
@@ -1075,13 +805,11 @@ elif page == "Prediction":
                         f"{height} × {width} × {bands}"
                     )
 
-                    # ------------------------------------------------
+                    # =================================================
                     # INPUT VISUALIZATION
-                    # ------------------------------------------------
+                    # =================================================
 
-                    st.subheader(
-                        "1. Input Visualization"
-                    )
+                    st.subheader("1. Input Visualization")
 
                     selected_band = st.slider(
                         "Select spectral band",
@@ -1091,11 +819,9 @@ elif page == "Prediction":
                         key="prediction_band"
                     )
 
-                    selected_wavelength = (
-                        WAVELENGTHS[
-                            selected_band
-                        ]
-                    )
+                    selected_wavelength = WAVELENGTHS[
+                        selected_band
+                    ]
 
                     original_band = hsi[
                         :,
@@ -1103,37 +829,8 @@ elif page == "Prediction":
                         selected_band
                     ]
 
-                    display_band = (
-                        normalize_band_for_display(
-                            original_band
-                        )
-                    )
-
-                    # ------------------------------------------------
-                    # PREPARE MODEL INPUT
-                    # ------------------------------------------------
-
-                    model_tensor = (
-                        prepare_hyperspectral_tensor(
-                            hsi
-                        )
-                    )
-
-                    model_band = (
-                        model_tensor[
-                            0,
-                            0,
-                            selected_band
-                        ]
-                        .detach()
-                        .cpu()
-                        .numpy()
-                    )
-
-                    model_band_display = (
-                        normalize_band_for_display(
-                            model_band
-                        )
+                    display_band = normalize_band_for_display(
+                        original_band
                     )
 
                     col1, col2 = st.columns(2)
@@ -1157,26 +854,31 @@ elif page == "Prediction":
                     with col2:
 
                         st.markdown(
-                            "#### Model Input Preview"
+                            "#### Model Processing"
                         )
 
-                        st.image(
-                            model_band_display,
-                            caption=(
-                                f"Band {selected_band + 1} "
-                                f"• {selected_wavelength} nm "
-                                f"• 32 × 32"
-                            ),
-                            use_container_width=True
+                        st.write(
+                            f"Original HSI: "
+                            f"{height} × {width} × {bands}"
                         )
 
-                    # ------------------------------------------------
-                    # PREDICTION BUTTON
-                    # ------------------------------------------------
+                        st.write(
+                            "Model input: 20 × 32 × 32"
+                        )
 
-                    st.subheader(
-                        "2. Run AI Prediction"
-                    )
+                        st.write(
+                            "Backend: FastAPI"
+                        )
+
+                        st.write(
+                            "Model: Tile-Level 3D-CNN"
+                        )
+
+                    # =================================================
+                    # RUN PREDICTION
+                    # =================================================
+
+                    st.subheader("2. Run AI Prediction")
 
                     if st.button(
                         "🔍 Run Tile-Level AI Prediction",
@@ -1187,27 +889,31 @@ elif page == "Prediction":
 
                         try:
 
-                            (
-                                predicted_class,
-                                confidence,
-                                probabilities,
-                                _
-                            ) = run_prediction(
-                                hsi
-                            )
+                            if not api_online:
+
+                                raise RuntimeError(
+                                    "FastAPI backend is offline. "
+                                    "Start it using:\n\n"
+                                    "python -m uvicorn "
+                                    "api.main:app --reload"
+                                )
+
+                            with st.spinner(
+                                "Running prediction through FastAPI..."
+                            ):
+
+                                api_result = predict_with_api(
+                                    uploaded_file
+                                )
 
                             st.session_state[
                                 "prediction_result"
-                            ] = {
-                                "predicted_class":
-                                    predicted_class,
+                            ] = api_result
 
-                                "confidence":
-                                    confidence,
-
-                                "probabilities":
-                                    probabilities
-                            }
+                            st.success(
+                                "Prediction completed successfully "
+                                "through the FastAPI backend."
+                            )
 
                         except Exception as exc:
 
@@ -1215,41 +921,55 @@ elif page == "Prediction":
                                 f"Prediction failed: {exc}"
                             )
 
-                    # ------------------------------------------------
-                    # RESULT
-                    # ------------------------------------------------
+                    # =================================================
+                    # DISPLAY RESULT
+                    # =================================================
 
-                    result = (
-                        st.session_state.get(
-                            "prediction_result"
-                        )
+                    result = st.session_state.get(
+                        "prediction_result"
                     )
 
                     if result is not None:
 
                         predicted_class = int(
-                            result[
-                                "predicted_class"
-                            ]
+                            result["predicted_class"]
                         )
+
+                        predicted_name = result[
+                            "class_name"
+                        ]
 
                         confidence = float(
-                            result[
-                                "confidence"
+                            result["confidence"]
+                        )
+
+                        probability_dict = result[
+                            "probabilities"
+                        ]
+
+                        probabilities = np.array(
+                            [
+                                float(
+                                    probability_dict[
+                                        CLASS_NAMES[0]
+                                    ]
+                                ),
+                                float(
+                                    probability_dict[
+                                        CLASS_NAMES[1]
+                                    ]
+                                ),
+                                float(
+                                    probability_dict[
+                                        CLASS_NAMES[2]
+                                    ]
+                                ),
                             ]
                         )
 
-                        probabilities = np.asarray(
-                            result[
-                                "probabilities"
-                            ]
-                        )
-
-                        predicted_name = (
-                            CLASS_NAMES.get(
-                                predicted_class,
-                                f"Class {predicted_class}"
-                            )
+                        input_shape = result.get(
+                            "input_shape",
+                            list(hsi.shape)
                         )
 
                         st.divider()
@@ -1281,9 +1001,9 @@ elif page == "Prediction":
                                 str(bands)
                             )
 
-                        # ------------------------------------------------
-                        # PROBABILITIES
-                        # ------------------------------------------------
+                        # =================================================
+                        # PROBABILITY DISTRIBUTION
+                        # =================================================
 
                         st.subheader(
                             "4. Class Probability Distribution"
@@ -1294,11 +1014,11 @@ elif page == "Prediction":
                                 "Class": [
                                     CLASS_NAMES[0],
                                     CLASS_NAMES[1],
-                                    CLASS_NAMES[2]
+                                    CLASS_NAMES[2],
                                 ],
                                 "Probability (%)": (
                                     probabilities * 100
-                                )
+                                ),
                             }
                         )
 
@@ -1317,10 +1037,9 @@ elif page == "Prediction":
                         ] = (
                             display_probability_df[
                                 "Probability (%)"
-                            ]
-                            .map(
+                            ].map(
                                 lambda value:
-                                    f"{value:.2f}%"
+                                f"{value:.2f}%"
                             )
                         )
 
@@ -1330,9 +1049,9 @@ elif page == "Prediction":
                             use_container_width=True
                         )
 
-                        # ------------------------------------------------
+                        # =================================================
                         # SPECTRAL SIGNATURE
-                        # ------------------------------------------------
+                        # =================================================
 
                         st.subheader(
                             "5. Mean Spectral Signature"
@@ -1344,10 +1063,8 @@ elif page == "Prediction":
 
                         spectral_df = pd.DataFrame(
                             {
-                                "Wavelength (nm)":
-                                    WAVELENGTHS,
-                                "Mean Intensity":
-                                    spectral_profile
+                                "Wavelength (nm)": WAVELENGTHS,
+                                "Mean Intensity": spectral_profile,
                             }
                         )
 
@@ -1357,9 +1074,9 @@ elif page == "Prediction":
                             )
                         )
 
-                        # ------------------------------------------------
+                        # =================================================
                         # INTERPRETATION
-                        # ------------------------------------------------
+                        # =================================================
 
                         st.subheader(
                             "6. Prediction Interpretation"
@@ -1392,9 +1109,9 @@ elif page == "Prediction":
                                 "prediction requires additional validation."
                             )
 
-                        # ------------------------------------------------
+                        # =================================================
                         # CONFIDENCE
-                        # ------------------------------------------------
+                        # =================================================
 
                         st.subheader(
                             "7. Confidence Assessment"
@@ -1422,9 +1139,9 @@ elif page == "Prediction":
                                 "Treat the result cautiously."
                             )
 
-                        # ------------------------------------------------
-                        # MODEL DETAILS
-                        # ------------------------------------------------
+                        # =================================================
+                        # INFERENCE DETAILS
+                        # =================================================
 
                         st.subheader(
                             "8. Inference Details"
@@ -1439,7 +1156,8 @@ elif page == "Prediction":
                             )
 
                             st.write(
-                                "**Input:** 20 spectral bands"
+                                f"**Input Shape:** "
+                                f"{input_shape}"
                             )
 
                             st.write(
@@ -1453,7 +1171,11 @@ elif page == "Prediction":
                         with col2:
 
                             st.write(
-                                "**Parameters:** 18,243"
+                                "**Backend:** FastAPI"
+                            )
+
+                            st.write(
+                                "**Endpoint:** POST /predict"
                             )
 
                             st.write(
@@ -1465,15 +1187,11 @@ elif page == "Prediction":
                                 "Tile-level classification"
                             )
 
-                            st.write(
-                                "**Checkpoint:** "
-                                "terraspectra_3dcnn_tilesplit_best.pt"
-                            )
-
                         st.info(
-                            "This model performs tile-level classification. "
-                            "It does not produce pixel-level disease "
-                            "segmentation or a true disease heatmap."
+                            "This model performs tile-level "
+                            "classification. It does not produce "
+                            "pixel-level disease segmentation or "
+                            "a true disease heatmap."
                         )
 
         except Exception as exc:
@@ -1489,9 +1207,7 @@ elif page == "Prediction":
 
 elif page == "Monitoring":
 
-    st.header(
-        "Agricultural Monitoring"
-    )
+    st.header("Agricultural Monitoring")
 
     st.info(
         "The current monitoring page is a prototype. "
@@ -1502,10 +1218,7 @@ elif page == "Monitoring":
     np.random.seed(42)
 
     monitoring_grid = pd.DataFrame(
-        np.random.rand(
-            12,
-            12
-        )
+        np.random.rand(12, 12)
     )
 
     st.subheader(
@@ -1513,9 +1226,7 @@ elif page == "Monitoring":
     )
 
     st.dataframe(
-        monitoring_grid.style.format(
-            "{:.2f}"
-        ),
+        monitoring_grid.style.format("{:.2f}"),
         use_container_width=True
     )
 
