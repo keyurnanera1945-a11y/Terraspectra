@@ -1205,33 +1205,293 @@ elif page == "Prediction":
 # PAGE 6 — MONITORING
 # ============================================================
 
+# ============================================================
+# PAGE 6 — MONITORING
+# ============================================================
+
 elif page == "Monitoring":
 
-    st.header("Agricultural Monitoring")
+    import folium
+    from streamlit_folium import st_folium
+
+    st.header("🗺️ Agricultural GIS Monitoring")
 
     st.info(
-        "The current monitoring page is a prototype. "
-        "GIS-linked geospatial inference will be added "
-        "in a later project phase."
+        "GIS monitoring prototype showing tile-level AI "
+        "predictions on a field map."
     )
 
-    np.random.seed(42)
-
-    monitoring_grid = pd.DataFrame(
-        np.random.rand(12, 12)
+    GEO_DATA_PATH = (
+        PROJECT_ROOT
+        / "outputs"
+        / "geospatial_predictions.csv"
     )
 
-    st.subheader(
-        "Field Risk Visualization Prototype"
-    )
+    if not GEO_DATA_PATH.exists():
 
-    st.dataframe(
-        monitoring_grid.style.format("{:.2f}"),
-        use_container_width=True
-    )
+        st.warning(
+            "Geospatial prediction dataset was not found."
+        )
 
-    st.info(
-        "Future versions will connect model predictions "
-        "with geographic coordinates to provide field-level "
-        "disease monitoring and risk mapping."
-    )
+        st.code(
+            "python src\\create_geospatial_dataset.py"
+        )
+
+    else:
+
+        geo_df = pd.read_csv(
+            GEO_DATA_PATH
+        )
+
+        # --------------------------------------------------------
+        # DATA SUMMARY
+        # --------------------------------------------------------
+
+        total_points = len(geo_df)
+
+        healthy_count = len(
+            geo_df[
+                geo_df["predicted_class"] == 0
+            ]
+        )
+
+        disease1_count = len(
+            geo_df[
+                geo_df["predicted_class"] == 1
+            ]
+        )
+
+        disease2_count = len(
+            geo_df[
+                geo_df["predicted_class"] == 2
+            ]
+        )
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+
+            st.metric(
+                "Mapped Tiles",
+                total_points
+            )
+
+        with col2:
+
+            st.metric(
+                "Healthy",
+                healthy_count
+            )
+
+        with col3:
+
+            st.metric(
+                "Disease Class 1",
+                disease1_count
+            )
+
+        with col4:
+
+            st.metric(
+                "Disease Class 2",
+                disease2_count
+            )
+
+        st.divider()
+
+        # --------------------------------------------------------
+        # FIELD MAP
+        # --------------------------------------------------------
+
+        st.subheader(
+            "Field Disease Risk Map"
+        )
+
+        center_lat = float(
+            geo_df["latitude"].mean()
+        )
+
+        center_lon = float(
+            geo_df["longitude"].mean()
+        )
+
+        field_map = folium.Map(
+            location=[
+                center_lat,
+                center_lon,
+            ],
+            zoom_start=17,
+            control_scale=True,
+        )
+
+        # Field boundary
+
+        min_lat = float(
+            geo_df["latitude"].min()
+        )
+
+        max_lat = float(
+            geo_df["latitude"].max()
+        )
+
+        min_lon = float(
+            geo_df["longitude"].min()
+        )
+
+        max_lon = float(
+            geo_df["longitude"].max()
+        )
+
+        folium.Rectangle(
+            bounds=[
+                [min_lat, min_lon],
+                [max_lat, max_lon],
+            ],
+            tooltip="TerraSpectra Demo Field",
+            fill=False,
+        ).add_to(field_map)
+
+        # --------------------------------------------------------
+        # PREDICTION MARKERS
+        # --------------------------------------------------------
+
+        for _, row in geo_df.iterrows():
+
+            predicted_class = int(
+                row["predicted_class"]
+            )
+
+            class_name = str(
+                row["class_name"]
+            )
+
+            confidence = float(
+                row["confidence"]
+            )
+
+            risk_level = str(
+                row["risk_level"]
+            )
+
+            if predicted_class == 0:
+
+                marker_color = "green"
+
+            elif predicted_class == 1:
+
+                marker_color = "orange"
+
+            else:
+
+                marker_color = "red"
+
+            popup_html = f"""
+            <b>TerraSpectra Prediction</b><br>
+            Class: {class_name}<br>
+            Confidence: {confidence * 100:.2f}%<br>
+            Risk Level: {risk_level}<br>
+            Latitude: {row['latitude']:.6f}<br>
+            Longitude: {row['longitude']:.6f}
+            """
+
+            folium.CircleMarker(
+                location=[
+                    float(row["latitude"]),
+                    float(row["longitude"]),
+                ],
+                radius=7,
+                color=marker_color,
+                fill=True,
+                fill_opacity=0.75,
+                popup=folium.Popup(
+                    popup_html,
+                    max_width=300,
+                ),
+            ).add_to(field_map)
+
+        st_folium(
+            field_map,
+            width=None,
+            height=600,
+            returned_objects=[],
+        )
+
+        # --------------------------------------------------------
+        # LEGEND
+        # --------------------------------------------------------
+
+        st.subheader(
+            "Risk Legend"
+        )
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+
+            st.success(
+                "🟢 Healthy / Low Risk"
+            )
+
+        with col2:
+
+            st.warning(
+                "🟠 Disease Class 1 / Moderate-High Risk"
+            )
+
+        with col3:
+
+            st.error(
+                "🔴 Disease Class 2 / High Risk"
+            )
+
+        # --------------------------------------------------------
+        # DATA TABLE
+        # --------------------------------------------------------
+
+        st.subheader(
+            "Geospatial Prediction Records"
+        )
+
+        display_columns = [
+            "latitude",
+            "longitude",
+            "predicted_class",
+            "class_name",
+            "confidence",
+            "risk_level",
+        ]
+
+        available_columns = [
+            column
+            for column in display_columns
+            if column in geo_df.columns
+        ]
+
+        display_df = geo_df[
+            available_columns
+        ].copy()
+
+        if "confidence" in display_df.columns:
+
+            display_df["confidence"] = (
+                display_df["confidence"] * 100
+            ).round(2)
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # --------------------------------------------------------
+        # IMPORTANT DATA NOTE
+        # --------------------------------------------------------
+
+        st.warning(
+            "Current map coordinates are simulated demo "
+            "coordinates because the available hyperspectral "
+            "dataset does not contain GPS coordinates. "
+            "For real UAV/GIS deployment, replace these "
+            "coordinates with actual georeferenced tile "
+            "locations."
+        )
