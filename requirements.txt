@@ -1,0 +1,20 @@
+@"
+numpy
+pandas
+scikit-learn
+scipy
+matplotlib
+seaborn
+torch
+torchvision
+streamlit
+requests
+fastapi
+uvicorn
+python-multipart
+pydantic
+folium
+streamlit-folium
+Pillow
+opencv-python
+"@ | Set-Content requirements.txt
