@@ -1,6 +1,5 @@
 from pathlib import Path
-import io
-import json
+from io import BytesIO
 
 import numpy as np
 import pandas as pd
@@ -8,10 +7,11 @@ import requests
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
+import pydeck as pdk
 
 
 # ============================================================
-# PAGE CONFIG
+# PAGE CONFIGURATION
 # ============================================================
 
 st.set_page_config(
@@ -23,41 +23,264 @@ st.set_page_config(
 
 
 # ============================================================
+# DARK MODE
+# ============================================================
+# This applies the dashboard theme directly from app.py.
+# No config.toml or external CSS file is required.
+
+st.markdown(
+    """
+    <style>
+        /* Main application */
+        .stApp {
+            background-color: #0b1120;
+            color: #f8fafc;
+        }
+
+        /* Main content */
+        .main {
+            background-color: #0b1120;
+        }
+
+        /* Sidebar */
+        section[data-testid="stSidebar"] {
+            background-color: #080d19;
+            border-right: 1px solid #1e293b;
+        }
+
+        section[data-testid="stSidebar"] * {
+            color: #f8fafc;
+        }
+
+        /* Headings */
+        h1, h2, h3, h4 {
+            color: #f8fafc !important;
+        }
+
+        /* Normal text */
+        p, label, span {
+            color: #cbd5e1;
+        }
+
+        /* Metric cards */
+        div[data-testid="stMetric"] {
+            background-color: #111827;
+            border: 1px solid #1e293b;
+            border-radius: 12px;
+            padding: 15px;
+        }
+
+        div[data-testid="stMetricLabel"] {
+            color: #94a3b8 !important;
+        }
+
+        div[data-testid="stMetricValue"] {
+            color: #f8fafc !important;
+        }
+
+        /* Buttons */
+        .stButton > button {
+            background-color: #16a34a;
+            color: white;
+            border: 1px solid #22c55e;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+
+        .stButton > button:hover {
+            background-color: #15803d;
+            color: white;
+            border-color: #4ade80;
+        }
+
+        /* Select boxes */
+        div[data-baseweb="select"] > div {
+            background-color: #111827;
+            border-color: #334155;
+            color: #f8fafc;
+        }
+
+        /* Text inputs */
+        input {
+            background-color: #111827 !important;
+            color: #f8fafc !important;
+        }
+
+        /* Number inputs */
+        div[data-baseweb="input"] {
+            background-color: #111827;
+        }
+
+        /* File uploader */
+        section[data-testid="stFileUploaderDropzone"] {
+            background-color: #111827;
+            border: 1px dashed #475569;
+            border-radius: 12px;
+        }
+
+        /* Tabs */
+        button[data-baseweb="tab"] {
+            color: #94a3b8;
+        }
+
+        button[data-baseweb="tab"][aria-selected="true"] {
+            color: #22c55e;
+        }
+
+        /* Expanders */
+        details {
+            background-color: #111827;
+            border: 1px solid #1e293b;
+            border-radius: 10px;
+        }
+
+        /* Dataframes */
+        div[data-testid="stDataFrame"] {
+            border: 1px solid #1e293b;
+            border-radius: 10px;
+        }
+
+        /* Alerts */
+        div[data-testid="stAlert"] {
+            border-radius: 10px;
+        }
+
+        /* Progress bar */
+        div[data-testid="stProgressBar"] > div > div {
+            background-color: #22c55e;
+        }
+
+        /* Horizontal separators */
+        hr {
+            border-color: #1e293b;
+        }
+
+        /* Radio buttons */
+        div[role="radiogroup"] label {
+            color: #cbd5e1;
+        }
+
+        /* Multiselect */
+        div[data-baseweb="tag"] {
+            background-color: #166534;
+        }
+
+        /* Captions */
+        .stCaption {
+            color: #64748b !important;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0b1120;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ============================================================
 # PROJECT PATHS
 # ============================================================
 
 ROOT = Path(__file__).resolve().parents[1]
 
 OUTPUTS = ROOT / "outputs"
-DATA_DIR = ROOT / "data" / "raw" / "hyperspectral" / "0"
-LABEL_DIR = ROOT / "data" / "raw" / "labels" / "0"
+
+DATA_DIR = (
+    ROOT
+    / "data"
+    / "raw"
+    / "hyperspectral"
+    / "0"
+)
+
+LABEL_DIR = (
+    ROOT
+    / "data"
+    / "raw"
+    / "hyperspectral"
+    / "labels"
+    / "0"
+)
+
 MODELS_DIR = OUTPUTS / "models"
 
 PATCH_CSV = OUTPUTS / "hyperspectral_patches.csv"
+
 GEO_CSV = OUTPUTS / "geospatial_predictions.csv"
 
-CONFUSION_CSV = OUTPUTS / "tilesplit_confusion_matrix.csv"
-REPORT_CSV = OUTPUTS / "tilesplit_classification_report.csv"
-HISTORY_CSV = OUTPUTS / "tilesplit_training_history.csv"
+CONFUSION_CSV = (
+    OUTPUTS / "tilesplit_confusion_matrix.csv"
+)
+
+REPORT_CSV = (
+    OUTPUTS / "tilesplit_classification_report.csv"
+)
+
+HISTORY_CSV = (
+    OUTPUTS / "tilesplit_training_history.csv"
+)
+
+EXPECTED_BANDS = 20
+
+
+# ============================================================
+# FASTAPI
+# ============================================================
 
 API_URLS = [
     "http://127.0.0.1:8000",
     "http://localhost:8000",
 ]
 
-EXPECTED_BANDS = 20
-
 
 # ============================================================
-# SPECTRAL INFORMATION
+# SPECTRAL BANDS
 # ============================================================
 
 WAVELENGTHS = [
-    420, 440, 500, 520, 540,
-    560, 580, 600, 620, 640,
-    660, 680, 700, 720, 740,
-    760, 770, 800, 850, 900
+    420,
+    440,
+    500,
+    520,
+    540,
+    560,
+    580,
+    600,
+    620,
+    640,
+    660,
+    680,
+    700,
+    720,
+    740,
+    760,
+    770,
+    800,
+    850,
+    900,
 ]
+
+
+# ============================================================
+# CLASS DEFINITIONS
+# ============================================================
 
 CLASS_NAMES = {
     0: "Healthy",
@@ -69,14 +292,8 @@ CLASS_COLORS = {
     "Healthy": "#22c55e",
     "Disease Class 1": "#f59e0b",
     "Disease Class 2": "#ef4444",
+    "Unknown": "#94a3b8",
 }
-
-ACCENT_CYAN = "#22d3ee"
-ACCENT_PURPLE = "#a855f7"
-ACCENT_BLUE = "#3b82f6"
-ACCENT_GREEN = "#22c55e"
-ACCENT_ORANGE = "#f59e0b"
-ACCENT_RED = "#ef4444"
 
 
 # ============================================================
@@ -90,755 +307,566 @@ if "prediction_result" not in st.session_state:
     st.session_state.prediction_result = None
 
 
-def navigate(page):
-    st.session_state.page = page
-    st.rerun()
-
-
 # ============================================================
-# DARK PROFESSIONAL THEME
-# ============================================================
-
-st.markdown(
-    """
-    <style>
-
-    .stApp {
-        background:
-            radial-gradient(circle at 10% 10%, rgba(34,211,238,0.07), transparent 28%),
-            radial-gradient(circle at 90% 20%, rgba(168,85,247,0.07), transparent 28%),
-            radial-gradient(circle at 50% 100%, rgba(34,197,94,0.04), transparent 30%),
-            #070b14;
-        color: #f8fafc;
-    }
-
-    [data-testid="stSidebar"] {
-        background: #090e19;
-        border-right: 1px solid rgba(148,163,184,0.12);
-    }
-
-    [data-testid="stSidebar"] * {
-        color: #e2e8f0;
-    }
-
-    h1, h2, h3 {
-        color: #f8fafc !important;
-        letter-spacing: -0.02em;
-    }
-
-    p, label, span {
-        color: #cbd5e1;
-    }
-
-    .hero {
-        padding: 26px 30px;
-        border-radius: 20px;
-        margin-bottom: 24px;
-        background:
-            linear-gradient(
-                135deg,
-                rgba(34,211,238,0.12),
-                rgba(168,85,247,0.10),
-                rgba(34,197,94,0.06)
-            );
-        border: 1px solid rgba(34,211,238,0.18);
-        box-shadow: 0 12px 40px rgba(0,0,0,0.28);
-    }
-
-    .hero-title {
-        font-size: 38px;
-        font-weight: 800;
-        margin-bottom: 5px;
-        color: #f8fafc;
-    }
-
-    .hero-subtitle {
-        color: #94a3b8;
-        font-size: 15px;
-    }
-
-    .section-label {
-        color: #22d3ee;
-        font-size: 12px;
-        font-weight: 800;
-        letter-spacing: 0.16em;
-        text-transform: uppercase;
-        margin-bottom: 5px;
-    }
-
-    .metric-card {
-        background: linear-gradient(
-            145deg,
-            rgba(15,23,42,0.95),
-            rgba(15,23,42,0.72)
-        );
-        border: 1px solid rgba(148,163,184,0.12);
-        border-radius: 17px;
-        padding: 20px;
-        min-height: 125px;
-        box-shadow: 0 8px 30px rgba(0,0,0,0.22);
-    }
-
-    .metric-label {
-        color: #94a3b8;
-        font-size: 12px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-    }
-
-    .metric-value {
-        color: #f8fafc;
-        font-size: 29px;
-        font-weight: 800;
-        margin-top: 7px;
-    }
-
-    .metric-note {
-        color: #64748b;
-        font-size: 12px;
-        margin-top: 5px;
-    }
-
-    .status-online {
-        color: #22c55e;
-        font-weight: 700;
-    }
-
-    .status-offline {
-        color: #ef4444;
-        font-weight: 700;
-    }
-
-    .feature-card {
-        background: rgba(15,23,42,0.72);
-        border: 1px solid rgba(148,163,184,0.10);
-        border-radius: 16px;
-        padding: 20px;
-        min-height: 150px;
-    }
-
-    .feature-title {
-        font-weight: 800;
-        color: #f8fafc;
-        margin-bottom: 7px;
-    }
-
-    .feature-text {
-        color: #94a3b8;
-        font-size: 13px;
-        line-height: 1.6;
-    }
-
-    .prediction-box {
-        border-radius: 20px;
-        padding: 28px;
-        margin-top: 15px;
-        border: 1px solid rgba(34,211,238,0.20);
-        background:
-            linear-gradient(
-                145deg,
-                rgba(34,211,238,0.08),
-                rgba(168,85,247,0.07)
-            );
-    }
-
-    .prediction-class {
-        font-size: 34px;
-        font-weight: 850;
-        color: #f8fafc;
-    }
-
-    .prediction-confidence {
-        font-size: 18px;
-        color: #22d3ee;
-        font-weight: 750;
-    }
-
-    .small-muted {
-        color: #64748b;
-        font-size: 12px;
-    }
-
-    div[data-testid="stFileUploader"] {
-        background: rgba(15,23,42,0.55);
-        border-radius: 15px;
-    }
-
-    .stButton > button {
-        border-radius: 11px;
-        border: 1px solid rgba(148,163,184,0.15);
-        background: rgba(15,23,42,0.85);
-        color: #e2e8f0;
-        font-weight: 700;
-        transition: all 0.2s ease;
-    }
-
-    .stButton > button:hover {
-        border-color: rgba(34,211,238,0.55);
-        color: #22d3ee;
-        transform: translateY(-1px);
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-# ============================================================
-# HELPERS
+# HELPER FUNCTIONS
 # ============================================================
 
 def fmt_number(value):
     try:
         return f"{int(value):,}"
     except Exception:
-        return "—"
+        return str(value)
 
 
 def normalize_image(image):
-    image = np.asarray(image, dtype=np.float32)
+    image = np.asarray(image)
 
     if image.size == 0:
+        return image
+
+    image = image.astype(np.float32)
+
+    minimum = np.nanmin(image)
+    maximum = np.nanmax(image)
+
+    if maximum - minimum == 0:
         return np.zeros_like(image)
 
-    image = np.nan_to_num(
-        image,
-        nan=0.0,
-        posinf=0.0,
-        neginf=0.0,
+    return (image - minimum) / (
+        maximum - minimum
     )
-
-    minimum = float(np.min(image))
-    maximum = float(np.max(image))
-
-    if maximum <= minimum:
-        return np.zeros_like(image, dtype=np.float32)
-
-    return (image - minimum) / (maximum - minimum)
 
 
 def normalize_cube_shape(cube):
-    """
-    Convert supported cube formats to H x W x Bands.
-    """
-
     cube = np.asarray(cube)
 
     if cube.ndim != 3:
         raise ValueError(
-            f"Expected 3D hyperspectral cube, received shape {cube.shape}"
+            f"Expected 3D cube, received {cube.shape}"
         )
 
-    shape = cube.shape
-
-    # H x W x Bands
-    if shape[-1] == EXPECTED_BANDS:
+    if cube.shape[-1] == EXPECTED_BANDS:
         return cube
 
-    # Bands x H x W
-    if shape[0] == EXPECTED_BANDS:
-        return np.transpose(cube, (1, 2, 0))
+    if cube.shape[0] == EXPECTED_BANDS:
+        return np.transpose(
+            cube,
+            (1, 2, 0),
+        )
 
-    # H x Bands x W
-    if shape[1] == EXPECTED_BANDS:
-        return np.transpose(cube, (0, 2, 1))
+    if cube.shape[1] == EXPECTED_BANDS:
+        return np.transpose(
+            cube,
+            (0, 2, 1),
+        )
 
     raise ValueError(
-        f"Could not find {EXPECTED_BANDS} spectral bands in cube shape {shape}"
+        f"Could not identify {EXPECTED_BANDS} bands "
+        f"in cube shape {cube.shape}"
     )
 
 
-def load_npz_bytes(raw_bytes):
-    with np.load(
-        io.BytesIO(raw_bytes),
-        allow_pickle=False
-    ) as data:
+def load_npz_bytes(uploaded_file):
+    data = np.load(
+        BytesIO(uploaded_file.getvalue())
+    )
 
-        if "im" not in data:
-            raise ValueError(
-                "The uploaded NPZ does not contain the required 'im' array."
-            )
+    if "im" in data.files:
+        cube = data["im"]
+    else:
+        cube = data[data.files[0]]
 
-        cube = normalize_cube_shape(data["im"])
-
-    return cube.astype(np.float32)
+    return normalize_cube_shape(cube)
 
 
-def load_dataset_cube(filename):
-    path = DATA_DIR / filename
+def load_dataset_cube(file_path):
+    data = np.load(file_path)
 
-    if not path.exists():
-        return None
+    if "im" in data.files:
+        cube = data["im"]
+    else:
+        cube = data[data.files[0]]
 
-    try:
-        with np.load(path, allow_pickle=False) as data:
-            if "im" not in data:
-                return None
-
-            return normalize_cube_shape(data["im"]).astype(np.float32)
-
-    except Exception:
-        return None
+    return normalize_cube_shape(cube)
 
 
 def load_dataframe(path):
-    try:
-        if path.exists():
-            return pd.read_csv(path)
-    except Exception:
-        pass
+    if not path.exists():
+        return pd.DataFrame()
 
-    return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        return pd.DataFrame()
 
 
 def find_column(df, candidates):
     if df.empty:
         return None
 
-    lower_map = {
+    normalized = {
         str(col).lower().strip(): col
         for col in df.columns
     }
 
     for candidate in candidates:
-        if candidate.lower() in lower_map:
-            return lower_map[candidate.lower()]
+
+        key = candidate.lower().strip()
+
+        if key in normalized:
+            return normalized[key]
 
     for col in df.columns:
-        col_lower = str(col).lower()
+
+        column_name = str(col).lower()
 
         for candidate in candidates:
-            if candidate.lower() in col_lower:
+
+            if candidate.lower() in column_name:
                 return col
 
     return None
 
 
 def class_from_value(value):
-    if pd.isna(value):
-        return "Unknown"
-
-    text = str(value).strip().lower()
-
-    if text in {"0", "healthy", "normal", "class 0", "healthy / normal"}:
-        return "Healthy"
-
-    if text in {"1", "disease class 1", "class 1", "disease1", "disease 1"}:
-        return "Disease Class 1"
-
-    if text in {"2", "disease class 2", "class 2", "disease2", "disease 2"}:
-        return "Disease Class 2"
 
     try:
-        number = int(float(value))
 
-        if number in CLASS_NAMES:
-            return CLASS_NAMES[number]
+        value_int = int(float(value))
+
+        if value_int in CLASS_NAMES:
+            return CLASS_NAMES[value_int]
 
     except Exception:
         pass
 
-    return str(value)
+    text = str(value).strip().lower()
 
+    if "healthy" in text:
+        return "Healthy"
 
-def load_patch_data():
-    return load_dataframe(PATCH_CSV)
+    if "class 1" in text:
+        return "Disease Class 1"
+
+    if "disease 1" in text:
+        return "Disease Class 1"
+
+    if "class 2" in text:
+        return "Disease Class 2"
+
+    if "disease 2" in text:
+        return "Disease Class 2"
+
+    return "Unknown"
 
 
 def get_dataset_stats():
-    patch_df = load_patch_data()
 
-    total_tiles = 0
-    total_patches = 0
+    patch_df = load_dataframe(
+        PATCH_CSV
+    )
+
+    tile_count = 0
 
     if DATA_DIR.exists():
-        total_tiles = len(list(DATA_DIR.glob("*.npz")))
 
-    if not patch_df.empty:
-        total_patches = len(patch_df)
-
-    class_counts = {
-        "Healthy": 8060,
-        "Disease Class 1": 360,
-        "Disease Class 2": 268,
-    }
-
-    if not patch_df.empty:
-        possible_class_col = find_column(
-            patch_df,
-            [
-                "class_id",
-                "class",
-                "label",
-                "target",
-                "disease_class",
-            ],
+        tile_count = len(
+            list(
+                DATA_DIR.glob("*.npz")
+            )
         )
 
-        if possible_class_col:
-            values = patch_df[possible_class_col].apply(class_from_value)
-            counts = values.value_counts()
+    patch_count = len(patch_df)
 
-            for class_name in class_counts:
-                if class_name in counts:
-                    class_counts[class_name] = int(
-                        counts[class_name]
-                    )
-
-    if total_patches == 0:
-        total_patches = sum(class_counts.values())
-
-    return total_tiles, total_patches, class_counts
+    return tile_count, patch_count
 
 
-def model_parameter_count():
-    default_params = 18243
+def get_model_parameter_count():
 
-    model_files = [
-        MODELS_DIR / "terraspectra_3dcnn_balanced_best.pt",
-        MODELS_DIR / "terraspectra_3dcnn_best.pt",
+    candidates = [
+        MODELS_DIR
+        / "terraspectra_3dcnn_balanced_best.pt",
+
+        MODELS_DIR
+        / "terraspectra_3dcnn_best.pt",
+
+        MODELS_DIR
+        / "tilesplit_best.pt",
     ]
 
-    for path in model_files:
-        if not path.exists():
+    for model_path in candidates:
+
+        if not model_path.exists():
             continue
 
         try:
+
             import torch
 
             checkpoint = torch.load(
-                path,
-                map_location="cpu"
+                model_path,
+                map_location="cpu",
             )
 
-            if isinstance(checkpoint, dict):
+            if isinstance(
+                checkpoint,
+                dict,
+            ):
+
                 state_dict = checkpoint.get(
-                    "state_dict",
-                    checkpoint.get("model_state_dict")
+                    "model_state_dict",
+                    checkpoint.get(
+                        "state_dict",
+                        checkpoint,
+                    ),
                 )
 
-                if state_dict:
-                    return sum(
-                        value.numel()
-                        for value in state_dict.values()
-                        if hasattr(value, "numel")
-                    )
+                total = 0
 
-        except Exception:
-            continue
+                for value in state_dict.values():
 
-    return default_params
+                    if hasattr(
+                        value,
+                        "numel",
+                    ):
+                        total += value.numel()
 
-
-# ============================================================
-# MODEL METRICS
-# ============================================================
-
-def load_confusion_matrix():
-    if CONFUSION_CSV.exists():
-        try:
-            matrix = pd.read_csv(
-                CONFUSION_CSV,
-                index_col=0
-            )
-
-            matrix = matrix.apply(
-                pd.to_numeric,
-                errors="coerce"
-            ).fillna(0)
-
-            if matrix.shape == (3, 3):
-                return matrix.values.astype(int)
+                if total > 0:
+                    return total
 
         except Exception:
             pass
 
-    return np.array(
-        [
-            [1535, 55, 1],
-            [39, 31, 0],
-            [62, 2, 0],
-        ]
+    return 18243
+
+
+def load_confusion_matrix():
+
+    df = load_dataframe(
+        CONFUSION_CSV
     )
 
+    if df.empty:
+        return None
 
-def calculate_metrics(matrix):
+    numeric = df.select_dtypes(
+        include=np.number
+    )
+
+    if (
+        numeric.shape[0] >= 3
+        and numeric.shape[1] >= 3
+    ):
+
+        return numeric.iloc[
+            :3,
+            :3,
+        ].values
+
+    return None
+
+
+def calculate_metrics():
+
+    matrix = load_confusion_matrix()
+
+    if matrix is None:
+        return None
+
     matrix = np.asarray(matrix)
 
     total = matrix.sum()
 
-    if total == 0:
-        return 0.0, 0.0, []
+    if total > 0:
+        accuracy = (
+            np.trace(matrix)
+            / total
+        )
+    else:
+        accuracy = 0
 
-    accuracy = np.trace(matrix) / total
+    precisions = []
+    recalls = []
+    f1_scores = []
 
-    class_metrics = []
+    for i in range(
+        len(matrix)
+    ):
 
-    for i in range(matrix.shape[0]):
         tp = matrix[i, i]
 
-        fp = matrix[:, i].sum() - tp
-        fn = matrix[i, :].sum() - tp
-
-        precision = (
-            tp / (tp + fp)
-            if (tp + fp) > 0
-            else 0
+        fp = (
+            matrix[:, i].sum()
+            - tp
         )
 
-        recall = (
-            tp / (tp + fn)
-            if (tp + fn) > 0
-            else 0
+        fn = (
+            matrix[i, :].sum()
+            - tp
         )
 
-        f1 = (
-            2 * precision * recall /
-            (precision + recall)
-            if (precision + recall) > 0
-            else 0
-        )
+        if tp + fp > 0:
+            precision = (
+                tp / (tp + fp)
+            )
+        else:
+            precision = 0
 
-        class_metrics.append(
-            {
-                "Class": CLASS_NAMES.get(i, f"Class {i}"),
-                "Precision": precision,
-                "Recall": recall,
-                "F1 Score": f1,
-                "Support": matrix[i].sum(),
-            }
-        )
+        if tp + fn > 0:
+            recall = (
+                tp / (tp + fn)
+            )
+        else:
+            recall = 0
 
-    macro_f1 = np.mean(
-        [item["F1 Score"] for item in class_metrics]
-    )
+        if precision + recall > 0:
 
-    return accuracy, macro_f1, class_metrics
-
-
-# ============================================================
-# API
-# ============================================================
-
-def api_health_check():
-    for base_url in API_URLS:
-        try:
-            response = requests.get(
-                f"{base_url}/health",
-                timeout=5
+            f1 = (
+                2
+                * precision
+                * recall
+                / (
+                    precision
+                    + recall
+                )
             )
 
-            if response.status_code < 500:
-                return True, base_url
+        else:
+            f1 = 0
+
+        precisions.append(
+            precision
+        )
+
+        recalls.append(
+            recall
+        )
+
+        f1_scores.append(
+            f1
+        )
+
+    return {
+        "accuracy": accuracy,
+        "macro_precision": np.mean(
+            precisions
+        ),
+        "macro_recall": np.mean(
+            recalls
+        ),
+        "macro_f1": np.mean(
+            f1_scores
+        ),
+        "precision": precisions,
+        "recall": recalls,
+        "f1": f1_scores,
+    }
+
+
+# ============================================================
+# FASTAPI FUNCTIONS
+# ============================================================
+
+def check_api():
+
+    for base_url in API_URLS:
+
+        try:
+
+            response = requests.get(
+                f"{base_url}/health",
+                timeout=2,
+            )
+
+            if response.status_code == 200:
+                return base_url
 
         except Exception:
             continue
 
-    return False, None
+    return None
 
 
-def parse_prediction_response(payload):
-    if not isinstance(payload, dict):
-        return None
+def parse_prediction_response(data):
 
-    data = payload
-
-    # Support nested API responses
-    for key in ["data", "result", "prediction"]:
-        if isinstance(data.get(key), dict):
-            data = data[key]
-            break
-
-    prediction = None
-    confidence = None
-    probabilities = None
-
-    prediction_keys = [
-        "predicted_class",
-        "predicted_class_id",
-        "class_id",
-        "prediction",
-        "predicted_label",
-        "label",
-        "class",
-    ]
-
-    for key in prediction_keys:
-        if key in data:
-            prediction = data[key]
-            break
-
-    confidence_keys = [
-        "confidence",
-        "prediction_confidence",
-        "probability",
-        "score",
-    ]
-
-    for key in confidence_keys:
-        if key in data:
-            confidence = data[key]
-            break
-
-    for key in [
-        "probabilities",
-        "class_probabilities",
-        "probs",
-        "probability_distribution",
-    ]:
-        if key in data:
-            probabilities = data[key]
-            break
-
-    if prediction is None:
-        return None
-
-    # Convert class ID to class name
-    try:
-        if isinstance(prediction, (int, float)):
-            prediction_id = int(prediction)
-
-            if prediction_id in CLASS_NAMES:
-                prediction = CLASS_NAMES[prediction_id]
-
-        elif isinstance(prediction, str):
-            prediction = class_from_value(prediction)
-
-    except Exception:
-        prediction = str(prediction)
-
-    # Confidence
-    try:
-        confidence = float(confidence)
-
-        if confidence <= 1:
-            confidence *= 100
-
-    except Exception:
-        confidence = None
-
-    return {
-        "class": str(prediction),
-        "confidence": confidence,
-        "probabilities": probabilities,
-        "raw": payload,
+    result = {
+        "class_id": None,
+        "class_name": "Unknown",
+        "confidence": 0.0,
+        "probabilities": {},
     }
 
+    if not isinstance(
+        data,
+        dict,
+    ):
+        return result
 
-def call_prediction_api(file_bytes, filename):
-    """
-    Tries common FastAPI endpoints.
+    possible_class = (
+        data.get("predicted_class")
+        or data.get("class_id")
+        or data.get("prediction")
+        or data.get("predicted_label")
+    )
 
-    No external API key is required.
-    """
+    if possible_class is not None:
 
-    errors = []
+        try:
+
+            class_id = int(
+                possible_class
+            )
+
+            result["class_id"] = (
+                class_id
+            )
+
+            result["class_name"] = (
+                CLASS_NAMES.get(
+                    class_id,
+                    f"Class {class_id}",
+                )
+            )
+
+        except Exception:
+
+            result["class_name"] = str(
+                possible_class
+            )
+
+    possible_confidence = (
+        data.get("confidence")
+        or data.get("probability")
+        or data.get("score")
+    )
+
+    if possible_confidence is not None:
+
+        try:
+
+            confidence = float(
+                possible_confidence
+            )
+
+            if confidence > 1:
+                confidence /= 100
+
+            result["confidence"] = (
+                confidence
+            )
+
+        except Exception:
+            pass
+
+    probabilities = (
+        data.get("probabilities")
+        or data.get(
+            "class_probabilities"
+        )
+        or data.get("probs")
+    )
+
+    if isinstance(
+        probabilities,
+        dict,
+    ):
+
+        parsed = {}
+
+        for key, value in (
+            probabilities.items()
+        ):
+
+            try:
+
+                parsed[
+                    class_from_value(key)
+                ] = float(value)
+
+            except Exception:
+                continue
+
+        result["probabilities"] = (
+            parsed
+        )
+
+    elif isinstance(
+        probabilities,
+        list,
+    ):
+
+        parsed = {}
+
+        for i, value in enumerate(
+            probabilities
+        ):
+
+            try:
+
+                parsed[
+                    CLASS_NAMES.get(
+                        i,
+                        f"Class {i}",
+                    )
+                ] = float(value)
+
+            except Exception:
+                continue
+
+        result["probabilities"] = (
+            parsed
+        )
+
+    return result
+
+
+def call_prediction_api(
+    base_url,
+    uploaded_file,
+):
+
+    files = {
+        "file": (
+            uploaded_file.name,
+            uploaded_file.getvalue(),
+            "application/octet-stream",
+        )
+    }
 
     endpoints = [
         "/predict",
-        "/api/predict",
         "/prediction",
-        "/api/prediction",
+        "/api/predict",
     ]
 
-    for base_url in API_URLS:
+    last_error = None
 
-        for endpoint in endpoints:
+    for endpoint in endpoints:
 
-            try:
-                response = requests.post(
-                    base_url + endpoint,
-                    files={
-                        "file": (
-                            filename,
-                            file_bytes,
-                            "application/octet-stream",
-                        )
-                    },
-                    timeout=120,
-                )
+        try:
 
-                if response.status_code == 404:
-                    continue
+            response = requests.post(
+                f"{base_url}{endpoint}",
+                files=files,
+                timeout=120,
+            )
 
-                if response.status_code >= 400:
-                    errors.append(
-                        f"{endpoint}: HTTP {response.status_code} - "
-                        f"{response.text[:250]}"
-                    )
-                    continue
+            if response.status_code == 200:
+                return response.json()
 
-                try:
-                    payload = response.json()
-                except Exception:
-                    errors.append(
-                        f"{endpoint}: API returned non-JSON response."
-                    )
-                    continue
+            last_error = (
+                f"{endpoint}: "
+                f"HTTP {response.status_code}"
+            )
 
-                result = parse_prediction_response(payload)
+        except Exception as exc:
 
-                if result is not None:
-                    return result, None
+            last_error = str(exc)
 
-                errors.append(
-                    f"{endpoint}: Response format not recognized."
-                )
-
-            except requests.exceptions.ConnectionError:
-                errors.append(
-                    f"{base_url}: backend connection failed."
-                )
-
-            except requests.exceptions.Timeout:
-                errors.append(
-                    f"{endpoint}: prediction request timed out."
-                )
-
-            except Exception as exc:
-                errors.append(
-                    f"{endpoint}: {str(exc)}"
-                )
-
-    return None, "\n".join(errors[-8:])
-
-
-# ============================================================
-# COMMON HEADER
-# ============================================================
-
-def render_header(title, subtitle):
-    st.markdown(
-        f"""
-        <div class="hero">
-            <div class="section-label">TerraSpectra AI</div>
-            <div class="hero-title">{title}</div>
-            <div class="hero-subtitle">{subtitle}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    raise RuntimeError(
+        last_error
+        or "Prediction API request failed."
     )
-
-
-def render_page_navigation():
-    cols = st.columns(3)
-
-    pages = [
-        ("🔬", "Spectral Analysis"),
-        ("🧠", "Disease Prediction"),
-        ("🗺️", "Monitoring"),
-    ]
-
-    for col, (icon, page) in zip(cols, pages):
-        with col:
-            if st.button(
-                f"{icon}  {page}",
-                width="stretch",
-                key=f"nav_{page}",
-            ):
-                navigate(page)
 
 
 # ============================================================
@@ -847,32 +875,18 @@ def render_page_navigation():
 
 with st.sidebar:
 
-    st.markdown(
-        """
-        <div style="
-            font-size:24px;
-            font-weight:800;
-            color:#f8fafc;
-            margin-bottom:3px;
-        ">
-            🌱 TerraSpectra
-        </div>
-        <div style="
-            color:#22d3ee;
-            font-size:12px;
-            font-weight:700;
-            letter-spacing:0.12em;
-        ">
-            HYPERSPECTRAL AI
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.title("🌱 TerraSpectra AI")
+
+    st.caption(
+        "Hyperspectral Potato Disease Intelligence"
     )
 
     st.divider()
 
-    selected_page = st.radio(
-        "NAVIGATION",
+    st.subheader("Navigation")
+
+    page = st.radio(
+        "Select module",
         [
             "Spectral Analysis",
             "Disease Prediction",
@@ -882,464 +896,321 @@ with st.sidebar:
             "Spectral Analysis",
             "Disease Prediction",
             "Monitoring",
-        ].index(st.session_state.page),
+        ].index(
+            st.session_state.page
+        ),
     )
 
-    if selected_page != st.session_state.page:
-        st.session_state.page = selected_page
-        st.rerun()
+    st.session_state.page = page
 
     st.divider()
 
-    total_tiles, total_patches, class_counts = get_dataset_stats()
+    st.subheader("System Status")
 
-    st.markdown(
-        "### Dataset"
-    )
+    api_status = check_api()
 
-    st.caption(
-        f"🛰️ {fmt_number(total_tiles)} hyperspectral tiles"
-    )
-
-    st.caption(
-        f"🧩 {fmt_number(total_patches)} labeled patches"
-    )
-
-    st.caption(
-        "🌈 20 spectral bands"
-    )
-
-    st.divider()
-
-    st.markdown(
-        "### Model"
-    )
-
-    st.caption(
-        "3D CNN • Tile Split"
-    )
-
-    st.caption(
-        "90.78% validation accuracy"
-    )
-
-    st.caption(
-        f"{fmt_number(model_parameter_count())} parameters"
-    )
-
-    st.divider()
-
-    st.caption(
-        "TerraSpectra AI • Research Dashboard"
-    )
-
-
-# ============================================================
-# PAGE 1 — SPECTRAL ANALYSIS
-# ============================================================
-
-if st.session_state.page == "Spectral Analysis":
-
-    render_header(
-        "Spectral Intelligence",
-        "Explore hyperspectral signatures, band responses and dimensionality reduction."
-    )
-
-    render_page_navigation()
-
-    st.write("")
-
-    total_tiles, total_patches, class_counts = get_dataset_stats()
-
-    # --------------------------------------------------------
-    # KPI ROW
-    # --------------------------------------------------------
-
-    cols = st.columns(4)
-
-    metrics = [
-        (
-            "HYPERSPECTRAL TILES",
-            fmt_number(total_tiles),
-            "UAV captured samples",
-        ),
-        (
-            "SPECTRAL BANDS",
-            "20",
-            "420–900 nm",
-        ),
-        (
-            "LABELED PATCHES",
-            fmt_number(total_patches),
-            "Disease detection samples",
-        ),
-        (
-            "PCA INFORMATION",
-            "99.23%",
-            "PC1 + PC2",
-        ),
-    ]
-
-    for col, (label, value, note) in zip(cols, metrics):
-
-        with col:
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-label">{label}</div>
-                    <div class="metric-value">{value}</div>
-                    <div class="metric-note">{note}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    st.write("")
-
-    # --------------------------------------------------------
-    # DATA SOURCE
-    # --------------------------------------------------------
-
-    st.markdown(
-        '<div class="section-label">DATA SOURCE</div>',
-        unsafe_allow_html=True,
-    )
-
-    uploaded = st.file_uploader(
-        "Upload hyperspectral NPZ file",
-        type=["npz"],
-        key="spectral_upload",
-    )
-
-    cube = None
-    source_name = None
-
-    if uploaded is not None:
-
-        try:
-            cube = load_npz_bytes(
-                uploaded.getvalue()
-            )
-
-            source_name = uploaded.name
-
-            st.success(
-                f"Loaded {uploaded.name} • Shape: {cube.shape}"
-            )
-
-        except Exception as exc:
-
-            st.error(
-                f"Unable to read hyperspectral file: {exc}"
-            )
-
+    if api_status:
+        st.success(
+            "● FastAPI Online"
+        )
     else:
+        st.error(
+            "● FastAPI Offline"
+        )
 
-        available_tiles = []
+    tile_count, patch_count = (
+        get_dataset_stats()
+    )
 
-        if DATA_DIR.exists():
-            available_tiles = sorted(
+    st.metric(
+        "Hyperspectral Tiles",
+        fmt_number(tile_count),
+    )
+
+    st.metric(
+        "Labeled Patches",
+        fmt_number(patch_count),
+    )
+
+    st.caption(
+        "20 bands • 3 disease classes"
+    )
+
+
+# ============================================================
+# MAIN HEADER
+# ============================================================
+
+st.title(
+    "🌱 TerraSpectra AI"
+)
+
+st.caption(
+    "AI-powered hyperspectral agriculture intelligence"
+)
+
+st.divider()
+
+
+# ============================================================
+# PAGE 1
+# SPECTRAL ANALYSIS
+# ============================================================
+
+if page == "Spectral Analysis":
+
+    st.header(
+        "🔬 Spectral Analysis"
+    )
+
+    st.write(
+        "Explore hyperspectral imagery, spectral bands, "
+        "pixel signatures and PCA information."
+    )
+
+    upload_tab, dataset_tab, pca_tab = st.tabs(
+        [
+            "📤 Upload Cube",
+            "📁 Dataset Explorer",
+            "📊 PCA Analysis",
+        ]
+    )
+
+    # ========================================================
+    # UPLOAD TAB
+    # ========================================================
+
+    with upload_tab:
+
+        uploaded = st.file_uploader(
+            "Upload hyperspectral NPZ",
+            type=["npz"],
+            key="spectral_upload",
+        )
+
+        cube = None
+
+        if uploaded is not None:
+
+            try:
+
+                cube = load_npz_bytes(
+                    uploaded
+                )
+
+                st.success(
+                    f"Hyperspectral cube loaded: "
+                    f"{cube.shape}"
+                )
+
+            except Exception as exc:
+
+                st.error(
+                    f"Unable to read file: {exc}"
+                )
+
+        elif DATA_DIR.exists():
+
+            files = sorted(
                 DATA_DIR.glob("*.npz")
             )
 
-        if available_tiles:
+            if files:
 
-            selected_tile = st.selectbox(
-                "Or select a dataset tile",
-                available_tiles,
-                format_func=lambda x: x.name,
+                selected_file = (
+                    st.selectbox(
+                        "Or select dataset tile",
+                        files,
+                        format_func=lambda x: x.name,
+                    )
+                )
+
+                try:
+
+                    cube = load_dataset_cube(
+                        selected_file
+                    )
+
+                except Exception as exc:
+
+                    st.error(
+                        f"Unable to load tile: {exc}"
+                    )
+
+        if cube is not None:
+
+            st.divider()
+
+            height, width, bands = (
+                cube.shape
             )
 
-            cube = load_dataset_cube(
-                selected_tile.name
+            c1, c2, c3 = st.columns(3)
+
+            c1.metric(
+                "Image Height",
+                f"{height}px",
             )
 
-            source_name = selected_tile.name
-
-    # --------------------------------------------------------
-    # SPECTRAL VISUALIZATION
-    # --------------------------------------------------------
-
-    if cube is not None:
-
-        st.divider()
-
-        left, right = st.columns([1.25, 1])
-
-        with left:
-
-            st.markdown(
-                '<div class="section-label">SPECTRAL BAND MAP</div>',
-                unsafe_allow_html=True,
+            c2.metric(
+                "Image Width",
+                f"{width}px",
             )
 
-            band_index = st.slider(
-                "Select spectral band",
+            c3.metric(
+                "Spectral Bands",
+                bands,
+            )
+
+            st.subheader(
+                "Spectral Band Viewer"
+            )
+
+            band_number = st.slider(
+                "Select band",
                 min_value=0,
-                max_value=EXPECTED_BANDS - 1,
-                value=8,
+                max_value=bands - 1,
+                value=0,
             )
-
-            wavelength = WAVELENGTHS[band_index]
 
             band_image = normalize_image(
-                cube[:, :, band_index]
+                cube[
+                    :,
+                    :,
+                    band_number,
+                ]
             )
 
-            fig = px.imshow(
+            wavelength = (
+                WAVELENGTHS[
+                    band_number
+                ]
+                if band_number
+                < len(WAVELENGTHS)
+                else "Unknown"
+            )
+
+            st.image(
                 band_image,
-                color_continuous_scale="Viridis",
-                aspect="auto",
-                labels={
-                    "x": "Pixel X",
-                    "y": "Pixel Y",
-                    "color": "Normalized Response",
-                },
-            )
-
-            fig.update_layout(
-                title=f"Band {band_index + 1} • {wavelength} nm",
-                height=470,
-                template="plotly_dark",
-                margin=dict(l=10, r=10, t=50, b=10),
-            )
-
-            st.plotly_chart(
-                fig,
+                caption=(
+                    f"Band {band_number + 1} "
+                    f"• {wavelength} nm"
+                ),
                 width="stretch",
             )
 
-        with right:
-
-            st.markdown(
-                '<div class="section-label">CUBE INFORMATION</div>',
-                unsafe_allow_html=True,
+            st.subheader(
+                "Band Statistics"
             )
 
-            st.markdown(
-                f"""
-                <div class="feature-card">
-                    <div class="feature-title">
-                        {source_name}
-                    </div>
-                    <div class="feature-text">
-                        Height: {cube.shape[0]} pixels<br>
-                        Width: {cube.shape[1]} pixels<br>
-                        Spectral bands: {cube.shape[2]}<br>
-                        Data type: float32<br>
-                        Selected wavelength: {wavelength} nm
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            selected_band = cube[
+                :,
+                :,
+                band_number,
+            ]
 
-            st.write("")
-
-            st.markdown(
-                '<div class="section-label">BAND STATISTICS</div>',
-                unsafe_allow_html=True,
-            )
-
-            band = cube[:, :, band_index]
-
-            stats = pd.DataFrame(
+            stats_df = pd.DataFrame(
                 {
-                    "Statistic": [
+                    "Metric": [
                         "Minimum",
                         "Maximum",
                         "Mean",
-                        "Std. Deviation",
+                        "Median",
+                        "Standard Deviation",
                     ],
                     "Value": [
-                        float(np.min(band)),
-                        float(np.max(band)),
-                        float(np.mean(band)),
-                        float(np.std(band)),
+                        float(
+                            np.min(
+                                selected_band
+                            )
+                        ),
+                        float(
+                            np.max(
+                                selected_band
+                            )
+                        ),
+                        float(
+                            np.mean(
+                                selected_band
+                            )
+                        ),
+                        float(
+                            np.median(
+                                selected_band
+                            )
+                        ),
+                        float(
+                            np.std(
+                                selected_band
+                            )
+                        ),
                     ],
                 }
             )
 
             st.dataframe(
-                stats,
-                hide_index=True,
+                stats_df,
                 width="stretch",
+                hide_index=True,
             )
 
-        # ----------------------------------------------------
-        # SPECTRAL SIGNATURE
-        # ----------------------------------------------------
-
-        st.divider()
-
-        st.markdown(
-            '<div class="section-label">SPECTRAL SIGNATURE</div>',
-            unsafe_allow_html=True,
-        )
-
-        h, w, bands = cube.shape
-
-        x_pixel = st.slider(
-            "Pixel X",
-            0,
-            w - 1,
-            w // 2,
-        )
-
-        y_pixel = st.slider(
-            "Pixel Y",
-            0,
-            h - 1,
-            h // 2,
-        )
-
-        spectrum = cube[
-            y_pixel,
-            x_pixel,
-            :
-        ]
-
-        spectrum_norm = normalize_image(
-            spectrum
-        )
-
-        fig = go.Figure()
-
-        fig.add_trace(
-            go.Scatter(
-                x=WAVELENGTHS,
-                y=spectrum_norm,
-                mode="lines+markers",
-                line=dict(
-                    width=3
-                ),
-                marker=dict(
-                    size=7
-                ),
-                name="Spectral Response",
-            )
-        )
-
-        fig.update_layout(
-            template="plotly_dark",
-            height=430,
-            xaxis_title="Wavelength (nm)",
-            yaxis_title="Normalized Spectral Response",
-            hovermode="x unified",
-            margin=dict(l=10, r=10, t=20, b=10),
-        )
-
-        st.plotly_chart(
-            fig,
-            width="stretch",
-        )
-
-        # ----------------------------------------------------
-        # PCA
-        # ----------------------------------------------------
-
-        st.divider()
-
-        st.markdown(
-            '<div class="section-label">DIMENSIONALITY REDUCTION</div>',
-            unsafe_allow_html=True,
-        )
-
-        try:
-
-            from sklearn.decomposition import PCA
-
-            pixels = cube.reshape(
-                -1,
-                cube.shape[-1]
+            st.subheader(
+                "Pixel Spectral Signature"
             )
 
-            max_samples = min(
-                10000,
-                len(pixels)
-            )
+            col_x, col_y = st.columns(2)
 
-            rng = np.random.default_rng(42)
+            with col_x:
 
-            if len(pixels) > max_samples:
-                indexes = rng.choice(
-                    len(pixels),
-                    max_samples,
-                    replace=False,
+                pixel_x = st.number_input(
+                    "X coordinate",
+                    min_value=0,
+                    max_value=width - 1,
+                    value=width // 2,
                 )
 
-                sample = pixels[indexes]
+            with col_y:
 
-            else:
-                sample = pixels
+                pixel_y = st.number_input(
+                    "Y coordinate",
+                    min_value=0,
+                    max_value=height - 1,
+                    value=height // 2,
+                )
 
-            sample = (
-                sample - sample.mean(axis=0)
-            ) / (
-                sample.std(axis=0) + 1e-8
+            spectrum = cube[
+                int(pixel_y),
+                int(pixel_x),
+                :,
+            ]
+
+            wavelengths = (
+                WAVELENGTHS[:bands]
+                if bands
+                <= len(WAVELENGTHS)
+                else list(range(bands))
             )
 
-            pca = PCA(
-                n_components=3
-            )
-
-            transformed = pca.fit_transform(
-                sample
-            )
-
-            explained = (
-                pca.explained_variance_ratio_
-                * 100
-            )
-
-            pc_cols = st.columns(3)
-
-            for i, col in enumerate(pc_cols):
-
-                with col:
-
-                    st.markdown(
-                        f"""
-                        <div class="metric-card">
-                            <div class="metric-label">
-                                PRINCIPAL COMPONENT {i + 1}
-                            </div>
-                            <div class="metric-value">
-                                {explained[i]:.2f}%
-                            </div>
-                            <div class="metric-note">
-                                Explained variance
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-            pca_df = pd.DataFrame(
+            spectrum_df = pd.DataFrame(
                 {
-                    "PC1": transformed[:, 0],
-                    "PC2": transformed[:, 1],
-                    "PC3": transformed[:, 2],
+                    "Wavelength": wavelengths,
+                    "Spectral Value": spectrum,
                 }
             )
 
-            fig = px.scatter_3d(
-                pca_df,
-                x="PC1",
-                y="PC2",
-                z="PC3",
-                opacity=0.65,
+            fig = px.line(
+                spectrum_df,
+                x="Wavelength",
+                y="Spectral Value",
+                markers=True,
+                title="Pixel Spectral Signature",
+                template="plotly_dark",
             )
 
             fig.update_layout(
-                template="plotly_dark",
-                height=600,
-                margin=dict(
-                    l=0,
-                    r=0,
-                    t=20,
-                    b=0,
-                ),
+                height=450,
+                paper_bgcolor="#0b1120",
+                plot_bgcolor="#111827",
             )
 
             st.plotly_chart(
@@ -1347,226 +1218,103 @@ if st.session_state.page == "Spectral Analysis":
                 width="stretch",
             )
 
-        except Exception as exc:
 
-            st.warning(
-                f"PCA visualization unavailable: {exc}"
+    # ========================================================
+    # DATASET TAB
+    # ========================================================
+
+    with dataset_tab:
+
+        st.subheader(
+            "Dataset Overview"
+        )
+
+        tile_count, patch_count = (
+            get_dataset_stats()
+        )
+
+        c1, c2, c3, c4 = st.columns(4)
+
+        c1.metric(
+            "Tiles",
+            fmt_number(tile_count),
+        )
+
+        c2.metric(
+            "Labeled Patches",
+            fmt_number(patch_count),
+        )
+
+        c3.metric(
+            "Spectral Bands",
+            EXPECTED_BANDS,
+        )
+
+        c4.metric(
+            "CNN Parameters",
+            fmt_number(
+                get_model_parameter_count()
+            ),
+        )
+
+        patch_df = load_dataframe(
+            PATCH_CSV
+        )
+
+        if not patch_df.empty:
+
+            class_col = find_column(
+                patch_df,
+                [
+                    "class",
+                    "label",
+                    "target",
+                    "disease_class",
+                ],
             )
 
+            if class_col:
 
-# ============================================================
-# PAGE 2 — DISEASE PREDICTION
-# ============================================================
-
-elif st.session_state.page == "Disease Prediction":
-
-    render_header(
-        "AI Disease Prediction",
-        "Upload a hyperspectral tile and obtain an AI-driven disease classification."
-    )
-
-    render_page_navigation()
-
-    st.write("")
-
-    # --------------------------------------------------------
-    # API STATUS
-    # --------------------------------------------------------
-
-    api_online, api_base = api_health_check()
-
-    cols = st.columns(4)
-
-    with cols[0]:
-        status_text = (
-            "ONLINE"
-            if api_online
-            else "OFFLINE"
-        )
-
-        status_color = (
-            "#22c55e"
-            if api_online
-            else "#ef4444"
-        )
-
-        st.markdown(
-            f"""
-            <div class="metric-card">
-                <div class="metric-label">AI API</div>
-                <div class="metric-value"
-                     style="color:{status_color};">
-                    {status_text}
-                </div>
-                <div class="metric-note">
-                    {api_base if api_base else "Start FastAPI backend"}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with cols[1]:
-
-        st.markdown(
-            """
-            <div class="metric-card">
-                <div class="metric-label">
-                    MODEL
-                </div>
-                <div class="metric-value">
-                    3D CNN
-                </div>
-                <div class="metric-note">
-                    Hyperspectral classifier
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with cols[2]:
-
-        st.markdown(
-            """
-            <div class="metric-card">
-                <div class="metric-label">
-                    VALIDATION
-                </div>
-                <div class="metric-value">
-                    90.78%
-                </div>
-                <div class="metric-note">
-                    Tile-split accuracy
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with cols[3]:
-
-        st.markdown(
-            """
-            <div class="metric-card">
-                <div class="metric-label">
-                    CLASSES
-                </div>
-                <div class="metric-value">
-                    3
-                </div>
-                <div class="metric-note">
-                    Healthy + 2 disease classes
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.write("")
-
-    # --------------------------------------------------------
-    # UPLOAD
-    # --------------------------------------------------------
-
-    st.markdown(
-        '<div class="section-label">INPUT DATA</div>',
-        unsafe_allow_html=True,
-    )
-
-    uploaded = st.file_uploader(
-        "Upload hyperspectral NPZ",
-        type=["npz"],
-        key="prediction_upload",
-        help="NPZ must contain an array named 'im'.",
-    )
-
-    if uploaded is None:
-
-        st.info(
-            "Upload an NPZ hyperspectral tile to begin disease prediction."
-        )
-
-        st.markdown(
-            """
-            <div class="feature-card">
-
-                <div class="feature-title">
-                    Expected Input
-                </div>
-
-                <div class="feature-text">
-                    • File format: NPZ<br>
-                    • Required array: im<br>
-                    • Spectral bands: 20<br>
-                    • Supported layouts: H×W×20, 20×H×W, H×20×W
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    else:
-
-        try:
-
-            file_bytes = uploaded.getvalue()
-
-            cube = load_npz_bytes(
-                file_bytes
-            )
-
-            st.success(
-                f"Input loaded successfully • {uploaded.name} • {cube.shape}"
-            )
-
-            # ------------------------------------------------
-            # PREVIEW
-            # ------------------------------------------------
-
-            st.divider()
-
-            left, right = st.columns([1.2, 1])
-
-            with left:
-
-                st.markdown(
-                    '<div class="section-label">INPUT PREVIEW</div>',
-                    unsafe_allow_html=True,
+                display_df = (
+                    patch_df.copy()
                 )
 
-                preview_band = st.slider(
-                    "Preview band",
-                    0,
-                    EXPECTED_BANDS - 1,
-                    8,
-                    key="prediction_band",
+                display_df[
+                    "Class Name"
+                ] = display_df[
+                    class_col
+                ].apply(
+                    class_from_value
                 )
 
-                preview = normalize_image(
-                    cube[:, :, preview_band]
+                distribution = (
+                    display_df[
+                        "Class Name"
+                    ]
+                    .value_counts()
+                    .reset_index()
                 )
 
-                fig = px.imshow(
-                    preview,
-                    color_continuous_scale="Viridis",
-                    aspect="auto",
+                distribution.columns = [
+                    "Class",
+                    "Samples",
+                ]
+
+                fig = px.bar(
+                    distribution,
+                    x="Class",
+                    y="Samples",
+                    color="Class",
+                    color_discrete_map=CLASS_COLORS,
+                    title="Patch Distribution",
+                    template="plotly_dark",
                 )
 
                 fig.update_layout(
-                    template="plotly_dark",
-                    height=430,
-                    title=(
-                        f"Band {preview_band + 1} • "
-                        f"{WAVELENGTHS[preview_band]} nm"
-                    ),
-                    margin=dict(
-                        l=10,
-                        r=10,
-                        t=50,
-                        b=10,
-                    ),
+                    showlegend=False,
+                    height=420,
+                    paper_bgcolor="#0b1120",
+                    plot_bgcolor="#111827",
                 )
 
                 st.plotly_chart(
@@ -1574,391 +1322,93 @@ elif st.session_state.page == "Disease Prediction":
                     width="stretch",
                 )
 
-            with right:
-
-                st.markdown(
-                    '<div class="section-label">INPUT VALIDATION</div>',
-                    unsafe_allow_html=True,
-                )
-
-                validation_data = pd.DataFrame(
-                    {
-                        "Property": [
-                            "Filename",
-                            "Shape",
-                            "Height",
-                            "Width",
-                            "Bands",
-                            "Data Type",
-                            "Minimum",
-                            "Maximum",
-                        ],
-                        "Value": [
-                            uploaded.name,
-                            str(cube.shape),
-                            cube.shape[0],
-                            cube.shape[1],
-                            cube.shape[2],
-                            str(cube.dtype),
-                            f"{np.min(cube):.3f}",
-                            f"{np.max(cube):.3f}",
-                        ],
-                    }
-                )
-
-                st.dataframe(
-                    validation_data,
-                    hide_index=True,
-                    width="stretch",
-                )
-
-            # ------------------------------------------------
-            # PREDICTION
-            # ------------------------------------------------
-
-            st.divider()
-
-            st.markdown(
-                '<div class="section-label">AI INFERENCE</div>',
-                unsafe_allow_html=True,
-            )
-
-            predict_button = st.button(
-                "🚀  RUN DISEASE PREDICTION",
-                width="stretch",
-                type="primary",
-            )
-
-            if predict_button:
-
-                with st.spinner(
-                    "Running hyperspectral AI inference..."
+                with st.expander(
+                    "View patch dataset"
                 ):
 
-                    result, error = call_prediction_api(
-                        file_bytes,
-                        uploaded.name,
+                    st.dataframe(
+                        display_df.head(
+                            200
+                        ),
+                        width="stretch",
+                        hide_index=True,
                     )
 
-                if result is not None:
+            else:
 
-                    st.session_state.prediction_result = result
-
-                else:
-
-                    st.session_state.prediction_result = None
-
-                    st.error(
-                        "Prediction could not be completed."
-                    )
-
-                    with st.expander(
-                        "Show prediction diagnostics"
-                    ):
-
-                        st.code(
-                            error
-                            or
-                            "No diagnostic information available."
-                        )
-
-                        st.info(
-                            "Start the FastAPI backend with:\n\n"
-                            "python -m uvicorn api.main:app --reload"
-                        )
-
-            # ------------------------------------------------
-            # RESULT
-            # ------------------------------------------------
-
-            result = st.session_state.prediction_result
-
-            if result is not None:
-
-                predicted_class = result["class"]
-                confidence = result["confidence"]
-
-                if predicted_class == "Healthy":
-                    result_color = ACCENT_GREEN
-
-                elif predicted_class == "Disease Class 1":
-                    result_color = ACCENT_ORANGE
-
-                elif predicted_class == "Disease Class 2":
-                    result_color = ACCENT_RED
-
-                else:
-                    result_color = ACCENT_CYAN
-
-                confidence_text = (
-                    f"{confidence:.2f}%"
-                    if confidence is not None
-                    else "Available"
+                st.dataframe(
+                    patch_df.head(200),
+                    width="stretch",
+                    hide_index=True,
                 )
 
-                st.markdown(
-                    f"""
-                    <div class="prediction-box">
+        else:
 
-                        <div class="section-label">
-                            PREDICTION RESULT
-                        </div>
-
-                        <div class="prediction-class"
-                             style="color:{result_color};">
-                            {predicted_class}
-                        </div>
-
-                        <div class="prediction-confidence">
-                            Confidence: {confidence_text}
-                        </div>
-
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-                probabilities = result.get(
-                    "probabilities"
-                )
-
-                if probabilities is not None:
-
-                    try:
-
-                        if isinstance(
-                            probabilities,
-                            dict
-                        ):
-
-                            probability_df = pd.DataFrame(
-                                {
-                                    "Class": [
-                                        class_from_value(k)
-                                        for k in probabilities.keys()
-                                    ],
-                                    "Probability": [
-                                        float(v) * 100
-                                        if float(v) <= 1
-                                        else float(v)
-                                        for v in probabilities.values()
-                                    ],
-                                }
-                            )
-
-                        elif isinstance(
-                            probabilities,
-                            (list, tuple)
-                        ):
-
-                            probability_df = pd.DataFrame(
-                                {
-                                    "Class": [
-                                        CLASS_NAMES.get(
-                                            i,
-                                            f"Class {i}"
-                                        )
-                                        for i in range(
-                                            len(probabilities)
-                                        )
-                                    ],
-                                    "Probability": [
-                                        float(v) * 100
-                                        if float(v) <= 1
-                                        else float(v)
-                                        for v in probabilities
-                                    ],
-                                }
-                            )
-
-                        else:
-                            probability_df = None
-
-                        if (
-                            probability_df is not None
-                            and not probability_df.empty
-                        ):
-
-                            st.write("")
-
-                            fig = px.bar(
-                                probability_df,
-                                x="Probability",
-                                y="Class",
-                                orientation="h",
-                                text="Probability",
-                            )
-
-                            fig.update_traces(
-                                texttemplate="%{text:.2f}%",
-                                textposition="outside",
-                            )
-
-                            fig.update_layout(
-                                template="plotly_dark",
-                                height=300,
-                                xaxis_title="Probability (%)",
-                                yaxis_title="",
-                                margin=dict(
-                                    l=10,
-                                    r=40,
-                                    t=20,
-                                    b=10,
-                                ),
-                            )
-
-                            st.plotly_chart(
-                                fig,
-                                width="stretch",
-                            )
-
-                    except Exception:
-                        pass
-
-        except Exception as exc:
-
-            st.error(
-                f"Invalid hyperspectral file: {exc}"
+            st.info(
+                "hyperspectral_patches.csv was not found."
             )
 
 
-# ============================================================
-# PAGE 3 — MONITORING
-# ============================================================
+    # ========================================================
+    # PCA TAB
+    # ========================================================
 
-elif st.session_state.page == "Monitoring":
+    with pca_tab:
 
-    render_header(
-        "Field Monitoring",
-        "Geospatial disease intelligence, model performance and field-level risk overview."
-    )
-
-    render_page_navigation()
-
-    st.write("")
-
-    # --------------------------------------------------------
-    # DATA
-    # --------------------------------------------------------
-
-    geo_df = load_dataframe(
-        GEO_CSV
-    )
-
-    matrix = load_confusion_matrix()
-
-    accuracy, macro_f1, class_metrics = calculate_metrics(
-        matrix
-    )
-
-    total_tiles, total_patches, class_counts = get_dataset_stats()
-
-    # --------------------------------------------------------
-    # KPI CARDS
-    # --------------------------------------------------------
-
-    cols = st.columns(5)
-
-    monitoring_metrics = [
-        (
-            "MONITORED TILES",
-            fmt_number(total_tiles),
-            "Hyperspectral samples",
-        ),
-        (
-            "LABELED PATCHES",
-            fmt_number(total_patches),
-            "Training / validation",
-        ),
-        (
-            "MODEL ACCURACY",
-            f"{accuracy * 100:.2f}%",
-            "Tile-split validation",
-        ),
-        (
-            "MACRO F1",
-            f"{macro_f1 * 100:.2f}%",
-            "Across 3 classes",
-        ),
-        (
-            "MODEL PARAMETERS",
-            fmt_number(model_parameter_count()),
-            "3D CNN",
-        ),
-    ]
-
-    for col, (label, value, note) in zip(
-        cols,
-        monitoring_metrics
-    ):
-
-        with col:
-
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-label">
-                        {label}
-                    </div>
-                    <div class="metric-value">
-                        {value}
-                    </div>
-                    <div class="metric-note">
-                        {note}
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    # --------------------------------------------------------
-    # DISEASE DISTRIBUTION
-    # --------------------------------------------------------
-
-    st.divider()
-
-    left, right = st.columns([1, 1.2])
-
-    with left:
-
-        st.markdown(
-            '<div class="section-label">DISEASE DISTRIBUTION</div>',
-            unsafe_allow_html=True,
+        st.subheader(
+            "Principal Component Analysis"
         )
 
-        distribution_df = pd.DataFrame(
+        st.write(
+            "PCA reduces hyperspectral dimensionality "
+            "while preserving the majority of spectral variance."
+        )
+
+        c1, c2, c3 = st.columns(3)
+
+        c1.metric(
+            "PC1",
+            "71.93%",
+        )
+
+        c2.metric(
+            "PC2",
+            "27.31%",
+        )
+
+        c3.metric(
+            "PC1 + PC2",
+            "99.24%",
+        )
+
+        pca_df = pd.DataFrame(
             {
-                "Class": list(
-                    class_counts.keys()
-                ),
-                "Samples": list(
-                    class_counts.values()
-                ),
+                "Component": [
+                    "PC1",
+                    "PC2",
+                    "PC3",
+                ],
+                "Variance": [
+                    71.93,
+                    27.31,
+                    0.99,
+                ],
             }
         )
 
-        fig = px.pie(
-            distribution_df,
-            names="Class",
-            values="Samples",
-            hole=0.58,
-            color="Class",
-            color_discrete_map=CLASS_COLORS,
+        fig = px.bar(
+            pca_df,
+            x="Component",
+            y="Variance",
+            title="Explained Spectral Variance",
+            template="plotly_dark",
         )
 
         fig.update_layout(
-            template="plotly_dark",
-            height=400,
-            margin=dict(
-                l=10,
-                r=10,
-                t=20,
-                b=10,
-            ),
-            legend=dict(
-                orientation="h",
-                y=-0.05,
-            ),
+            yaxis_title="Variance (%)",
+            height=430,
+            paper_bgcolor="#0b1120",
+            plot_bgcolor="#111827",
         )
 
         st.plotly_chart(
@@ -1966,64 +1416,322 @@ elif st.session_state.page == "Monitoring":
             width="stretch",
         )
 
-    with right:
-
-        st.markdown(
-            '<div class="section-label">CLASS PERFORMANCE</div>',
-            unsafe_allow_html=True,
+        st.success(
+            "PC1 and PC2 together capture approximately "
+            "99% of the spectral variance."
         )
 
-        if class_metrics:
 
-            performance_df = pd.DataFrame(
-                class_metrics
+# ============================================================
+# PAGE 2
+# DISEASE PREDICTION
+# ============================================================
+
+elif page == "Disease Prediction":
+
+    st.header(
+        "🧠 Disease Prediction"
+    )
+
+    st.write(
+        "Upload a hyperspectral NPZ cube and run "
+        "AI-based disease classification."
+    )
+
+    api_url = check_api()
+
+    if api_url:
+
+        st.success(
+            f"FastAPI connected: {api_url}"
+        )
+
+    else:
+
+        st.error(
+            "FastAPI backend is offline."
+        )
+
+        st.code(
+            "python -m uvicorn api.main:app --reload"
+        )
+
+    uploaded = st.file_uploader(
+        "Upload hyperspectral NPZ",
+        type=["npz"],
+        key="prediction_upload",
+    )
+
+    if uploaded is not None:
+
+        try:
+
+            cube = load_npz_bytes(
+                uploaded
             )
 
-            display_df = performance_df.copy()
+            st.success(
+                f"Valid hyperspectral cube: "
+                f"{cube.shape}"
+            )
 
-            for column in [
-                "Precision",
-                "Recall",
-                "F1 Score",
-            ]:
+            st.subheader(
+                "Input Preview"
+            )
 
-                display_df[column] = (
-                    display_df[column] * 100
-                ).round(2)
+            preview_band = st.slider(
+                "Preview spectral band",
+                0,
+                cube.shape[-1] - 1,
+                0,
+                key="prediction_band",
+            )
 
-            st.dataframe(
-                display_df,
-                hide_index=True,
+            preview = normalize_image(
+                cube[
+                    :,
+                    :,
+                    preview_band,
+                ]
+            )
+
+            st.image(
+                preview,
+                caption=(
+                    f"Band {preview_band + 1}"
+                ),
                 width="stretch",
             )
 
-            fig = go.Figure()
+            st.subheader(
+                "Input Validation"
+            )
 
-            for metric in [
-                "Precision",
-                "Recall",
-                "F1 Score",
-            ]:
+            c1, c2, c3 = st.columns(3)
 
-                fig.add_trace(
-                    go.Bar(
-                        name=metric,
-                        x=display_df["Class"],
-                        y=display_df[metric],
-                    )
+            c1.metric(
+                "Height",
+                cube.shape[0],
+            )
+
+            c2.metric(
+                "Width",
+                cube.shape[1],
+            )
+
+            c3.metric(
+                "Bands",
+                cube.shape[2],
+            )
+
+            if (
+                cube.shape[-1]
+                != EXPECTED_BANDS
+            ):
+
+                st.error(
+                    f"Expected {EXPECTED_BANDS} bands, "
+                    f"received {cube.shape[-1]}."
                 )
 
-            fig.update_layout(
-                template="plotly_dark",
-                barmode="group",
-                height=330,
-                yaxis_title="Score (%)",
-                margin=dict(
-                    l=10,
-                    r=10,
-                    t=20,
-                    b=10,
+            else:
+
+                if st.button(
+                    "🚀 Run Disease Prediction",
+                    type="primary",
+                    width="stretch",
+                ):
+
+                    if not api_url:
+
+                        st.error(
+                            "Start the FastAPI backend first."
+                        )
+
+                    else:
+
+                        with st.spinner(
+                            "Running AI inference..."
+                        ):
+
+                            try:
+
+                                response = (
+                                    call_prediction_api(
+                                        api_url,
+                                        uploaded,
+                                    )
+                                )
+
+                                result = (
+                                    parse_prediction_response(
+                                        response
+                                    )
+                                )
+
+                                st.session_state[
+                                    "prediction_result"
+                                ] = result
+
+                                st.success(
+                                    "Prediction completed."
+                                )
+
+                            except Exception as exc:
+
+                                st.error(
+                                    f"Prediction failed: {exc}"
+                                )
+
+        except Exception as exc:
+
+            st.error(
+                f"Invalid NPZ file: {exc}"
+            )
+
+
+    # ========================================================
+    # PREDICTION RESULT
+    # ========================================================
+
+    result = (
+        st.session_state
+        .prediction_result
+    )
+
+    if result:
+
+        st.divider()
+
+        st.subheader(
+            "Prediction Result"
+        )
+
+        class_name = (
+            result["class_name"]
+        )
+
+        confidence = (
+            result["confidence"]
+        )
+
+        if class_name == "Healthy":
+
+            st.success(
+                f"🌱 Prediction: {class_name}"
+            )
+
+        elif (
+            class_name
+            == "Disease Class 1"
+        ):
+
+            st.warning(
+                f"⚠️ Prediction: {class_name}"
+            )
+
+        elif (
+            class_name
+            == "Disease Class 2"
+        ):
+
+            st.error(
+                f"🚨 Prediction: {class_name}"
+            )
+
+        else:
+
+            st.info(
+                f"Prediction: {class_name}"
+            )
+
+        c1, c2, c3 = st.columns(3)
+
+        c1.metric(
+            "Predicted Class",
+            class_name,
+        )
+
+        c2.metric(
+            "Confidence",
+            f"{confidence * 100:.2f}%",
+        )
+
+        c3.metric(
+            "Class ID",
+            (
+                result["class_id"]
+                if result["class_id"]
+                is not None
+                else "N/A"
+            ),
+        )
+
+        st.progress(
+            min(
+                max(
+                    confidence,
+                    0.0,
                 ),
+                1.0,
+            ),
+            text=(
+                f"Confidence: "
+                f"{confidence * 100:.2f}%"
+            ),
+        )
+
+        probabilities = (
+            result.get(
+                "probabilities",
+                {},
+            )
+        )
+
+        if probabilities:
+
+            st.subheader(
+                "Class Probabilities"
+            )
+
+            probability_df = (
+                pd.DataFrame(
+                    {
+                        "Class": list(
+                            probabilities.keys()
+                        ),
+                        "Probability": [
+                            float(value)
+                            for value in probabilities.values()
+                        ],
+                    }
+                )
+            )
+
+            probability_df[
+                "Probability (%)"
+            ] = (
+                probability_df[
+                    "Probability"
+                ]
+                * 100
+            )
+
+            fig = px.bar(
+                probability_df,
+                x="Class",
+                y="Probability (%)",
+                color="Class",
+                color_discrete_map=CLASS_COLORS,
+                title="Prediction Probability",
+                template="plotly_dark",
+            )
+
+            fig.update_layout(
+                showlegend=False,
+                height=430,
+                paper_bgcolor="#0b1120",
+                plot_bgcolor="#111827",
             )
 
             st.plotly_chart(
@@ -2031,25 +1739,148 @@ elif st.session_state.page == "Monitoring":
                 width="stretch",
             )
 
-    # --------------------------------------------------------
-    # GEOSPATIAL MONITORING
-    # --------------------------------------------------------
+            st.dataframe(
+                probability_df,
+                width="stretch",
+                hide_index=True,
+            )
+
+
+# ============================================================
+# PAGE 3
+# MONITORING
+# ============================================================
+
+elif page == "Monitoring":
+
+    st.header(
+        "🗺️ Field Monitoring"
+    )
+
+    st.write(
+        "Monitor disease distribution, geospatial predictions "
+        "and machine-learning performance."
+    )
+
+    geo_df = load_dataframe(
+        GEO_CSV
+    )
+
+    report_df = load_dataframe(
+        REPORT_CSV
+    )
+
+    history_df = load_dataframe(
+        HISTORY_CSV
+    )
+
+    metrics = calculate_metrics()
+
+    # ========================================================
+    # KPI SECTION
+    # ========================================================
+
+    tile_count, patch_count = (
+        get_dataset_stats()
+    )
+
+    total_locations = len(
+        geo_df
+    )
+
+    disease_locations = 0
+
+    if not geo_df.empty:
+
+        disease_col = find_column(
+            geo_df,
+            [
+                "Disease Class",
+                "Disease",
+                "Class",
+                "Prediction",
+                "Predicted Class",
+                "label",
+            ],
+        )
+
+        if disease_col:
+
+            geo_df[
+                "_ClassName"
+            ] = geo_df[
+                disease_col
+            ].apply(
+                class_from_value
+            )
+
+            disease_locations = int(
+                (
+                    geo_df[
+                        "_ClassName"
+                    ]
+                    != "Healthy"
+                ).sum()
+            )
+
+    c1, c2, c3, c4, c5 = (
+        st.columns(5)
+    )
+
+    c1.metric(
+        "Hyperspectral Tiles",
+        fmt_number(tile_count),
+    )
+
+    c2.metric(
+        "Labeled Patches",
+        fmt_number(patch_count),
+    )
+
+    c3.metric(
+        "Map Locations",
+        fmt_number(total_locations),
+    )
+
+    c4.metric(
+        "Disease Locations",
+        fmt_number(
+            disease_locations
+        ),
+    )
+
+    if metrics:
+
+        c5.metric(
+            "Model Accuracy",
+            f"{metrics['accuracy'] * 100:.2f}%",
+        )
+
+    else:
+
+        c5.metric(
+            "Model Accuracy",
+            "N/A",
+        )
 
     st.divider()
 
-    st.markdown(
-        '<div class="section-label">GEOSPATIAL DISEASE INTELLIGENCE</div>',
-        unsafe_allow_html=True,
+    # ========================================================
+    # REAL OPENSTREETMAP
+    # ========================================================
+
+    st.subheader(
+        "🌍 Disease Monitoring Map"
     )
 
     if geo_df.empty:
 
-        st.info(
-            "No geospatial prediction file was found."
+        st.warning(
+            "Geospatial prediction data not found."
         )
 
-        st.caption(
-            f"Expected file: {GEO_CSV}"
+        st.info(
+            "Expected: outputs/geospatial_predictions.csv"
         )
 
     else:
@@ -2057,74 +1888,65 @@ elif st.session_state.page == "Monitoring":
         lat_col = find_column(
             geo_df,
             [
+                "Latitude",
                 "latitude",
                 "lat",
-                "y",
             ],
         )
 
         lon_col = find_column(
             geo_df,
             [
+                "Longitude",
                 "longitude",
                 "lon",
                 "lng",
-                "x",
             ],
         )
 
-        class_col = find_column(
+        disease_col = find_column(
             geo_df,
             [
-                "class",
-                "class_id",
-                "prediction",
-                "predicted_class",
+                "Disease Class",
+                "Disease",
+                "Class",
+                "Prediction",
+                "Predicted Class",
                 "label",
-                "disease_class",
             ],
         )
 
         if (
-            lat_col is None
-            or lon_col is None
+            not lat_col
+            or not lon_col
         ):
 
-            st.warning(
-                "Latitude/longitude columns were not detected in geospatial_predictions.csv."
-            )
-
-            st.dataframe(
-                geo_df.head(100),
-                width="stretch",
+            st.error(
+                "Latitude or Longitude columns "
+                "were not found."
             )
 
         else:
 
             map_df = geo_df.copy()
 
-            map_df["Latitude"] = pd.to_numeric(
-                map_df[lat_col],
-                errors="coerce",
+            map_df["Latitude"] = (
+                pd.to_numeric(
+                    map_df[
+                        lat_col
+                    ],
+                    errors="coerce",
+                )
             )
 
-            map_df["Longitude"] = pd.to_numeric(
-                map_df[lon_col],
-                errors="coerce",
+            map_df["Longitude"] = (
+                pd.to_numeric(
+                    map_df[
+                        lon_col
+                    ],
+                    errors="coerce",
+                )
             )
-
-            if class_col:
-
-                map_df["Disease Class"] = (
-                    map_df[class_col]
-                    .apply(class_from_value)
-                )
-
-            else:
-
-                map_df["Disease Class"] = (
-                    "Unknown"
-                )
 
             map_df = map_df.dropna(
                 subset=[
@@ -2133,98 +1955,362 @@ elif st.session_state.page == "Monitoring":
                 ]
             )
 
-            # ----------------------------------------------
-            # CLASS FILTER
-            # ----------------------------------------------
+            if disease_col:
 
-            available_classes = [
-                value
-                for value in [
-                    "Healthy",
-                    "Disease Class 1",
-                    "Disease Class 2",
-                ]
-                if value in set(
-                    map_df["Disease Class"]
-                )
-            ]
-
-            selected_classes = st.multiselect(
-                "Display classes",
-                available_classes,
-                default=available_classes,
-            )
-
-            filtered_map = map_df[
-                map_df["Disease Class"].isin(
-                    selected_classes
-                )
-            ]
-
-            # ----------------------------------------------
-            # PLOTLY GEO MAP
-            # ----------------------------------------------
-
-            if filtered_map.empty:
-
-                st.warning(
-                    "No points match the selected classes."
+                map_df[
+                    "Disease Class"
+                ] = map_df[
+                    disease_col
+                ].apply(
+                    class_from_value
                 )
 
             else:
 
-                fig = px.scatter_geo(
+                map_df[
+                    "Disease Class"
+                ] = "Unknown"
+
+            # ------------------------------------------------
+            # FILTER
+            # ------------------------------------------------
+
+            selected_classes = (
+                st.multiselect(
+                    "Filter disease classes",
+                    [
+                        "Healthy",
+                        "Disease Class 1",
+                        "Disease Class 2",
+                    ],
+                    default=[
+                        "Healthy",
+                        "Disease Class 1",
+                        "Disease Class 2",
+                    ],
+                )
+            )
+
+            filtered_map = map_df[
+                map_df[
+                    "Disease Class"
+                ].isin(
+                    selected_classes
+                )
+            ].copy()
+
+            # ------------------------------------------------
+            # MAP COLORS
+            # ------------------------------------------------
+
+            def map_color(
+                class_name
+            ):
+
+                if (
+                    class_name
+                    == "Healthy"
+                ):
+                    return [
+                        34,
+                        197,
+                        94,
+                        230,
+                    ]
+
+                if (
+                    class_name
+                    == "Disease Class 1"
+                ):
+                    return [
+                        245,
+                        158,
+                        11,
+                        235,
+                    ]
+
+                if (
+                    class_name
+                    == "Disease Class 2"
+                ):
+                    return [
+                        239,
+                        68,
+                        68,
+                        240,
+                    ]
+
+                return [
+                    148,
+                    163,
+                    184,
+                    220,
+                ]
+
+            filtered_map[
+                "Color"
+            ] = filtered_map[
+                "Disease Class"
+            ].apply(
+                map_color
+            )
+
+            # ------------------------------------------------
+            # MAP CENTER
+            # ------------------------------------------------
+
+            if not filtered_map.empty:
+
+                center_lat = float(
+                    filtered_map[
+                        "Latitude"
+                    ].mean()
+                )
+
+                center_lon = float(
+                    filtered_map[
+                        "Longitude"
+                    ].mean()
+                )
+
+                lat_range = (
+                    filtered_map[
+                        "Latitude"
+                    ].max()
+                    - filtered_map[
+                        "Latitude"
+                    ].min()
+                )
+
+                lon_range = (
+                    filtered_map[
+                        "Longitude"
+                    ].max()
+                    - filtered_map[
+                        "Longitude"
+                    ].min()
+                )
+
+                max_range = max(
+                    float(
+                        lat_range
+                    ),
+                    float(
+                        lon_range
+                    ),
+                )
+
+                if max_range < 0.01:
+
+                    zoom = 14
+
+                elif max_range < 0.05:
+
+                    zoom = 12
+
+                elif max_range < 0.2:
+
+                    zoom = 10
+
+                elif max_range < 1:
+
+                    zoom = 7
+
+                else:
+
+                    zoom = 4
+
+            else:
+
+                center_lat = 22.3072
+                center_lon = 72.1362
+                zoom = 5
+
+            # ------------------------------------------------
+            # OPENSTREETMAP TILE LAYER
+            # ------------------------------------------------
+
+            osm_layer = pdk.Layer(
+                "TileLayer",
+                data=(
+                    "https://tile.openstreetmap.org/"
+                    "{z}/{x}/{y}.png"
+                ),
+                min_zoom=0,
+                max_zoom=19,
+                tile_size=256,
+            )
+
+            # ------------------------------------------------
+            # DISEASE POINT LAYER
+            # ------------------------------------------------
+
+            point_layer = pdk.Layer(
+                "ScatterplotLayer",
+                data=filtered_map,
+                get_position=[
+                    "Longitude",
+                    "Latitude",
+                ],
+                get_fill_color="Color",
+                get_radius=50,
+                radius_min_pixels=5,
+                radius_max_pixels=25,
+                pickable=True,
+                stroked=True,
+                get_line_color=[
+                    255,
+                    255,
+                    255,
+                    180,
+                ],
+                line_width_min_pixels=1,
+            )
+
+            # ------------------------------------------------
+            # MAP VIEW
+            # ------------------------------------------------
+
+            view_state = pdk.ViewState(
+                latitude=center_lat,
+                longitude=center_lon,
+                zoom=zoom,
+                pitch=0,
+                bearing=0,
+            )
+
+            deck = pdk.Deck(
+                layers=[
+                    osm_layer,
+                    point_layer,
+                ],
+                initial_view_state=view_state,
+                tooltip={
+                    "text": (
+                        "Disease: {Disease Class}\n"
+                        "Latitude: {Latitude}\n"
+                        "Longitude: {Longitude}"
+                    )
+                },
+            )
+
+            st.pydeck_chart(
+                deck,
+                width="stretch",
+                height=650,
+            )
+
+            st.caption(
+                "Street map © OpenStreetMap contributors. "
+                "Markers represent the disease predictions "
+                "contained in the geospatial dataset."
+            )
+
+            # ------------------------------------------------
+            # LEGEND
+            # ------------------------------------------------
+
+            st.subheader(
+                "Map Legend"
+            )
+
+            l1, l2, l3 = (
+                st.columns(3)
+            )
+
+            l1.success(
+                "🟢 Healthy"
+            )
+
+            l2.warning(
+                "🟠 Disease Class 1"
+            )
+
+            l3.error(
+                "🔴 Disease Class 2"
+            )
+
+            with st.expander(
+                "View mapped predictions"
+            ):
+
+                st.dataframe(
                     filtered_map,
-                    lat="Latitude",
-                    lon="Longitude",
+                    width="stretch",
+                    hide_index=True,
+                )
+
+    st.divider()
+
+    # ========================================================
+    # DISEASE DISTRIBUTION
+    # ========================================================
+
+    st.subheader(
+        "📊 Disease Distribution"
+    )
+
+    if not geo_df.empty:
+
+        disease_col = find_column(
+            geo_df,
+            [
+                "Disease Class",
+                "Disease",
+                "Class",
+                "Prediction",
+                "Predicted Class",
+                "label",
+            ],
+        )
+
+        if disease_col:
+
+            distribution = (
+                geo_df[
+                    disease_col
+                ]
+                .apply(
+                    class_from_value
+                )
+                .value_counts()
+                .reindex(
+                    [
+                        "Healthy",
+                        "Disease Class 1",
+                        "Disease Class 2",
+                    ],
+                    fill_value=0,
+                )
+                .reset_index()
+            )
+
+            distribution.columns = [
+                "Disease Class",
+                "Locations",
+            ]
+
+            c1, c2 = (
+                st.columns(2)
+            )
+
+            with c1:
+
+                fig = px.pie(
+                    distribution,
+                    names="Disease Class",
+                    values="Locations",
                     color="Disease Class",
                     color_discrete_map=CLASS_COLORS,
-                    hover_name="Disease Class",
-                    hover_data={
-                        "Latitude": ":.6f",
-                        "Longitude": ":.6f",
-                    },
-                    projection="natural earth",
-                )
-
-                fig.update_traces(
-                    marker=dict(
-                        size=9,
-                        opacity=0.85,
-                        line=dict(
-                            width=1
-                        ),
-                    )
-                )
-
-                fig.update_geos(
-                    showland=True,
-                    landcolor="#111827",
-                    showocean=True,
-                    oceancolor="#050b16",
-                    showcountries=True,
-                    countrycolor="#475569",
-                    coastlinecolor="#64748b",
-                    showlakes=True,
-                    lakecolor="#0b1220",
-                    bgcolor="rgba(0,0,0,0)",
+                    hole=0.55,
+                    title="Disease Distribution",
+                    template="plotly_dark",
                 )
 
                 fig.update_layout(
-                    template="plotly_dark",
-                    height=600,
-                    margin=dict(
-                        l=0,
-                        r=0,
-                        t=10,
-                        b=0,
-                    ),
-                    legend=dict(
-                        title="Disease Status",
-                        orientation="h",
-                        y=0.02,
-                        x=0.02,
-                    ),
+                    height=430,
+                    paper_bgcolor="#0b1120",
+                    plot_bgcolor="#111827",
                 )
 
                 st.plotly_chart(
@@ -2232,108 +2318,139 @@ elif st.session_state.page == "Monitoring":
                     width="stretch",
                 )
 
-                st.caption(
-                    "Monitoring coordinates are displayed from the available geospatial prediction dataset. "
-                    "If the dataset uses simulated/demo coordinates, treat the map as a visualization rather than live GPS."
+            with c2:
+
+                fig = px.bar(
+                    distribution,
+                    x="Disease Class",
+                    y="Locations",
+                    color="Disease Class",
+                    color_discrete_map=CLASS_COLORS,
+                    title="Disease Class Counts",
+                    template="plotly_dark",
                 )
 
-            # ----------------------------------------------
-            # GEOSPATIAL SUMMARY
-            # ----------------------------------------------
-
-            st.write("")
-
-            summary_cols = st.columns(3)
-
-            for col, class_name in zip(
-                summary_cols,
-                [
-                    "Healthy",
-                    "Disease Class 1",
-                    "Disease Class 2",
-                ],
-            ):
-
-                count = int(
-                    (
-                        map_df["Disease Class"]
-                        == class_name
-                    ).sum()
+                fig.update_layout(
+                    showlegend=False,
+                    height=430,
+                    paper_bgcolor="#0b1120",
+                    plot_bgcolor="#111827",
                 )
 
-                with col:
+                st.plotly_chart(
+                    fig,
+                    width="stretch",
+                )
 
-                    color = CLASS_COLORS[
-                        class_name
-                    ]
 
-                    st.markdown(
-                        f"""
-                        <div class="metric-card">
-                            <div class="metric-label">
-                                {class_name}
-                            </div>
-                            <div class="metric-value"
-                                 style="color:{color};">
-                                {count:,}
-                            </div>
-                            <div class="metric-note">
-                                Geospatial predictions
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-    # --------------------------------------------------------
-    # CONFUSION MATRIX
-    # --------------------------------------------------------
+    # ========================================================
+    # MODEL DIAGNOSTICS
+    # ========================================================
 
     st.divider()
 
-    st.markdown(
-        '<div class="section-label">MODEL DIAGNOSTICS</div>',
-        unsafe_allow_html=True,
+    st.subheader(
+        "🎯 Model Diagnostics"
     )
 
-    left, right = st.columns([1, 1])
+    if metrics:
 
-    with left:
-
-        matrix_df = pd.DataFrame(
-            matrix,
-            index=[
-                "Healthy",
-                "Disease Class 1",
-                "Disease Class 2",
-            ],
-            columns=[
-                "Healthy",
-                "Disease Class 1",
-                "Disease Class 2",
-            ],
+        c1, c2, c3, c4 = (
+            st.columns(4)
         )
 
-        fig = px.imshow(
-            matrix_df,
-            text_auto=True,
-            color_continuous_scale="Viridis",
-            labels={
-                "x": "Predicted",
-                "y": "Actual",
-                "color": "Samples",
-            },
+        c1.metric(
+            "Accuracy",
+            f"{metrics['accuracy'] * 100:.2f}%",
+        )
+
+        c2.metric(
+            "Macro Precision",
+            f"{metrics['macro_precision'] * 100:.2f}%",
+        )
+
+        c3.metric(
+            "Macro Recall",
+            f"{metrics['macro_recall'] * 100:.2f}%",
+        )
+
+        c4.metric(
+            "Macro F1",
+            f"{metrics['macro_f1'] * 100:.2f}%",
+        )
+
+        performance_df = (
+            pd.DataFrame(
+                {
+                    "Class": [
+                        "Healthy",
+                        "Disease Class 1",
+                        "Disease Class 2",
+                    ],
+                    "Precision": [
+                        metrics[
+                            "precision"
+                        ][0],
+                        metrics[
+                            "precision"
+                        ][1],
+                        metrics[
+                            "precision"
+                        ][2],
+                    ],
+                    "Recall": [
+                        metrics[
+                            "recall"
+                        ][0],
+                        metrics[
+                            "recall"
+                        ][1],
+                        metrics[
+                            "recall"
+                        ][2],
+                    ],
+                    "F1 Score": [
+                        metrics[
+                            "f1"
+                        ][0],
+                        metrics[
+                            "f1"
+                        ][1],
+                        metrics[
+                            "f1"
+                        ][2],
+                    ],
+                }
+            )
+        )
+
+        performance_long = (
+            performance_df.melt(
+                id_vars="Class",
+                var_name="Metric",
+                value_name="Score",
+            )
+        )
+
+        performance_long[
+            "Score"
+        ] *= 100
+
+        fig = px.bar(
+            performance_long,
+            x="Class",
+            y="Score",
+            color="Metric",
+            barmode="group",
+            title="Class-wise Model Performance",
+            template="plotly_dark",
         )
 
         fig.update_layout(
-            template="plotly_dark",
-            height=430,
-            margin=dict(
-                l=10,
-                r=10,
-                t=30,
-                b=10,
-            ),
+            yaxis_title="Score (%)",
+            height=450,
+            paper_bgcolor="#0b1120",
+            plot_bgcolor="#111827",
         )
 
         st.plotly_chart(
@@ -2341,113 +2458,186 @@ elif st.session_state.page == "Monitoring":
             width="stretch",
         )
 
-    with right:
-
-        st.markdown(
-            """
-            <div class="feature-card">
-
-                <div class="feature-title">
-                    Model Intelligence
-                </div>
-
-                <div class="feature-text">
-
-                    <b>Architecture</b><br>
-                    3D Convolutional Neural Network<br><br>
-
-                    <b>Input</b><br>
-                    20-band hyperspectral patches<br><br>
-
-                    <b>Validation Strategy</b><br>
-                    Tile-level train/validation split<br><br>
-
-                    <b>Validation Accuracy</b><br>
-                    90.78%<br><br>
-
-                    <b>Primary Objective</b><br>
-                    Detect healthy potato regions and
-                    distinguish two disease classes.
-
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
+        st.dataframe(
+            performance_df.style.format(
+                {
+                    "Precision": "{:.2%}",
+                    "Recall": "{:.2%}",
+                    "F1 Score": "{:.2%}",
+                }
+            ),
+            width="stretch",
+            hide_index=True,
         )
 
-    # --------------------------------------------------------
+
+    # ========================================================
+    # CONFUSION MATRIX
+    # ========================================================
+
+    matrix = (
+        load_confusion_matrix()
+    )
+
+    if matrix is not None:
+
+        st.subheader(
+            "Confusion Matrix"
+        )
+
+        class_labels = [
+            "Healthy",
+            "Disease Class 1",
+            "Disease Class 2",
+        ]
+
+        fig = go.Figure(
+            data=go.Heatmap(
+                z=matrix,
+                x=class_labels,
+                y=class_labels,
+                text=matrix,
+                texttemplate="%{text}",
+                colorscale="Viridis",
+                hovertemplate=(
+                    "Actual: %{y}<br>"
+                    "Predicted: %{x}<br>"
+                    "Samples: %{z}"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+        fig.update_layout(
+            title="Model Confusion Matrix",
+            xaxis_title="Predicted Class",
+            yaxis_title="Actual Class",
+            template="plotly_dark",
+            height=500,
+            paper_bgcolor="#0b1120",
+            plot_bgcolor="#111827",
+        )
+
+        st.plotly_chart(
+            fig,
+            width="stretch",
+        )
+
+        matrix_df = pd.DataFrame(
+            matrix,
+            index=class_labels,
+            columns=class_labels,
+        )
+
+        st.dataframe(
+            matrix_df,
+            width="stretch",
+        )
+
+
+    # ========================================================
     # TRAINING HISTORY
-    # --------------------------------------------------------
+    # ========================================================
 
-    if HISTORY_CSV.exists():
+    if not history_df.empty:
 
-        st.divider()
-
-        st.markdown(
-            '<div class="section-label">TRAINING INTELLIGENCE</div>',
-            unsafe_allow_html=True,
+        st.subheader(
+            "📈 Training History"
         )
 
-        history_df = load_dataframe(
-            HISTORY_CSV
+        epoch_col = find_column(
+            history_df,
+            [
+                "epoch",
+                "Epoch",
+            ],
         )
 
-        if not history_df.empty:
+        accuracy_col = find_column(
+            history_df,
+            [
+                "val_accuracy",
+                "validation_accuracy",
+                "accuracy",
+                "val_acc",
+            ],
+        )
 
-            numeric_cols = history_df.select_dtypes(
-                include=np.number
-            ).columns.tolist()
+        loss_col = find_column(
+            history_df,
+            [
+                "val_loss",
+                "validation_loss",
+                "loss",
+            ],
+        )
 
-            if numeric_cols:
+        if epoch_col:
 
-                epoch_col = find_column(
-                    history_df,
-                    [
-                        "epoch",
-                        "epochs",
-                    ],
+            chart_data = {
+                "Epoch": history_df[
+                    epoch_col
+                ]
+            }
+
+            if accuracy_col:
+
+                chart_data[
+                    "Validation Accuracy"
+                ] = history_df[
+                    accuracy_col
+                ]
+
+            if loss_col:
+
+                chart_data[
+                    "Validation Loss"
+                ] = history_df[
+                    loss_col
+                ]
+
+            chart_df = pd.DataFrame(
+                chart_data
+            )
+
+            value_columns = [
+                column
+                for column
+                in chart_df.columns
+                if column != "Epoch"
+            ]
+
+            if value_columns:
+
+                fig = px.line(
+                    chart_df,
+                    x="Epoch",
+                    y=value_columns,
+                    markers=True,
+                    title="Training Progress",
+                    template="plotly_dark",
                 )
 
-                if epoch_col:
+                fig.update_layout(
+                    height=450,
+                    paper_bgcolor="#0b1120",
+                    plot_bgcolor="#111827",
+                )
 
-                    metric_options = [
-                        col
-                        for col in numeric_cols
-                        if col != epoch_col
-                    ]
+                st.plotly_chart(
+                    fig,
+                    width="stretch",
+                )
 
-                    if metric_options:
+        with st.expander(
+            "View training history"
+        ):
 
-                        selected_metric = st.selectbox(
-                            "Training metric",
-                            metric_options,
-                        )
-
-                        fig = px.line(
-                            history_df,
-                            x=epoch_col,
-                            y=selected_metric,
-                            markers=True,
-                        )
-
-                        fig.update_layout(
-                            template="plotly_dark",
-                            height=400,
-                            xaxis_title="Epoch",
-                            yaxis_title=selected_metric,
-                            margin=dict(
-                                l=10,
-                                r=10,
-                                t=20,
-                                b=10,
-                            ),
-                        )
-
-                        st.plotly_chart(
-                            fig,
-                            width="stretch",
-                        )
+            st.dataframe(
+                history_df,
+                width="stretch",
+                hide_index=True,
+            )
 
 
 # ============================================================
@@ -2456,17 +2646,7 @@ elif st.session_state.page == "Monitoring":
 
 st.divider()
 
-st.markdown(
-    """
-    <div style="
-        text-align:center;
-        padding:15px;
-        color:#475569;
-        font-size:12px;
-    ">
-        TerraSpectra AI • Hyperspectral Potato Disease Detection
-        • 3D CNN • Spectral Intelligence • Geospatial Monitoring
-    </div>
-    """,
-    unsafe_allow_html=True,
+st.caption(
+    "TerraSpectra AI • Hyperspectral Agriculture Intelligence • "
+    "PCA • 3D CNN • FastAPI • Streamlit"
 )
