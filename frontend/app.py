@@ -876,6 +876,8 @@ def call_prediction_api(
 with st.sidebar:
 
     st.title("🌱 TerraSpectra AI")
+    st.caption("TerraSpectra AI • Project 2")
+    st.caption("Development Status: Active")
 
     st.caption(
         "Hyperspectral Potato Disease Intelligence"
