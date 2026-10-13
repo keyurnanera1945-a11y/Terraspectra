@@ -963,6 +963,7 @@ if page == "Spectral Analysis":
 
     st.header(
         "🔬 Spectral Analysis"
+    st.caption("Explore hyperspectral data and spectral band patterns.")    
     )
 
     st.write(
