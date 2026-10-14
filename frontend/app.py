@@ -2252,6 +2252,7 @@ elif page == "Monitoring":
     st.subheader(
         "📊 Disease Distribution"
     )
+    st.caption("Upload a hyperspectral image to analyze potential potato diseases.")
 
     if not geo_df.empty:
 
