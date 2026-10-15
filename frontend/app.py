@@ -1758,6 +1758,7 @@ elif page == "Monitoring":
 
     st.header(
         "🗺️ Field Monitoring"
+    st.caption("Monitor disease distribution and model performance across analyzed tiles.")    
     )
 
     st.write(
